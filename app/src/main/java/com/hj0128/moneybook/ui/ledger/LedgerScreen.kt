@@ -8,7 +8,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -18,7 +17,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,6 +34,7 @@ import java.time.YearMonth
 @Composable
 fun LedgerScreen(
     onAddTransaction: () -> Unit,
+    onOpenCategory: (categoryId: Long, yearMonth: YearMonth) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LedgerViewModel = viewModel(
         factory = LedgerViewModel.factory(YearMonth.now())
@@ -91,25 +90,22 @@ fun LedgerScreen(
 
                 LedgerTab.MONTHLY -> MonthlyTab(viewModel = viewModel)
 
-                LedgerTab.CATEGORY -> CategoryTab(viewModel = viewModel)
+                LedgerTab.CATEGORY -> CategoryTab(
+                    viewModel = viewModel,
+                    // 상단에서 고른 달을 그대로 넘긴다. 상세는 그 달에 고정된다.
+                    onOpenCategory = { categoryId -> onOpenCategory(categoryId, yearMonth) },
+                )
             }
         }
     }
 
     pendingDeleteId?.let { id ->
-        AlertDialog(
-            onDismissRequest = { pendingDeleteId = null },
-            title = { Text("이 내역을 삭제할까요?") },
-            text = { Text("삭제하면 되돌릴 수 없습니다.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.delete(id)
-                    pendingDeleteId = null
-                }) { Text("삭제") }
+        DeleteTransactionDialog(
+            onConfirm = {
+                viewModel.delete(id)
+                pendingDeleteId = null
             },
-            dismissButton = {
-                TextButton(onClick = { pendingDeleteId = null }) { Text("취소") }
-            },
+            onDismiss = { pendingDeleteId = null },
         )
     }
 }

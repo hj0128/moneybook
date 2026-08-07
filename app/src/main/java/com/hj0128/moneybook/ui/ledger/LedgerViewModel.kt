@@ -105,15 +105,10 @@ class LedgerViewModel(
 
     val dailyState: StateFlow<DailyUiState> =
         combine(monthTransactions, settingsRepository.daySortOrder) { (month, items), sortOrder ->
-            // DAO 가 날짜 내림차순으로 주므로 groupBy 결과도 최신순이다.
-            val groups = items.groupBy { it.date }
-                .map { (date, dayItems) ->
-                    DayGroup(date = date, dayTotal = dayItems.toSummary(), items = dayItems)
-                }
             DailyUiState(
                 yearMonth = month,
                 summary = items.toSummary(),
-                groups = groups.applySort(sortOrder),
+                groups = items.toDayGroups().applySort(sortOrder),
                 sortOrder = sortOrder,
             )
         }.stateIn(
@@ -197,6 +192,16 @@ class LedgerViewModel(
         }
     }
 }
+
+/**
+ * 하루 단위로 묶는다. 일별 탭과 카테고리 상세가 같은 모양의 목록을 쓴다.
+ *
+ * DAO 가 날짜 내림차순으로 주므로 groupBy 결과도 최신순이다.
+ */
+internal fun List<TransactionDetail>.toDayGroups(): List<DayGroup> =
+    groupBy { it.date }.map { (date, dayItems) ->
+        DayGroup(date = date, dayTotal = dayItems.toSummary(), items = dayItems)
+    }
 
 /**
  * 정렬 방향 적용. DAO 가 최신순으로 주므로 최신순은 그대로 두고 오래된순만 뒤집는다.

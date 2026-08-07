@@ -1,8 +1,5 @@
 package com.hj0128.moneybook.ui.ledger
 
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,10 +13,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SwapVert
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,20 +23,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hj0128.moneybook.data.model.DaySortOrder
-import com.hj0128.moneybook.data.model.TransactionDetail
-import com.hj0128.moneybook.data.model.TransactionType
-import com.hj0128.moneybook.ui.theme.LocalLedgerColors
-import com.hj0128.moneybook.util.formatListHeader
-import com.hj0128.moneybook.util.formatWon
 
 /** 일별 탭: 한 달을 날짜별로 묶어 보여준다. */
 @Composable
@@ -114,108 +100,6 @@ private fun SortToggle(
                 style = MaterialTheme.typography.labelLarge,
             )
         }
-    }
-}
-
-@Composable
-private fun DayHeader(group: DayGroup) {
-    val ledgerColors = LocalLedgerColors.current
-    Column {
-        HorizontalDivider()
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = group.date.formatListHeader(),
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.weight(1f),
-            )
-            if (group.dayTotal.income > 0) {
-                Text(
-                    text = group.dayTotal.income.formatWon(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ledgerColors.income,
-                )
-                Spacer(Modifier.width(8.dp))
-            }
-            if (group.dayTotal.expense > 0) {
-                Text(
-                    text = group.dayTotal.expense.formatWon(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ledgerColors.expense,
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun TransactionRow(
-    item: TransactionDetail,
-    onLongClick: () -> Unit,
-) {
-    val ledgerColors = LocalLedgerColors.current
-    val amountColor = when (item.type) {
-        TransactionType.INCOME -> ledgerColors.income
-        TransactionType.EXPENSE -> ledgerColors.expense
-        TransactionType.TRANSFER -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val amountText = when (item.type) {
-        TransactionType.INCOME -> "+${item.amount.formatWon()}"
-        TransactionType.EXPENSE -> "-${item.amount.formatWon()}"
-        TransactionType.TRANSFER -> item.amount.formatWon()
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = {}, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(
-                    item.categoryColor?.let { Color(it) }
-                        ?: MaterialTheme.colorScheme.outline
-                ),
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            val subtitle = listOfNotNull(
-                item.accountName.takeIf { item.type != TransactionType.TRANSFER },
-                item.memo.takeIf { it.isNotBlank() },
-            ).joinToString(" · ")
-            if (subtitle.isNotBlank()) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Text(
-            text = amountText,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = amountColor,
-        )
     }
 }
 

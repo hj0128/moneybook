@@ -1,6 +1,7 @@
 package com.hj0128.moneybook.ui.ledger
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +18,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -45,6 +49,7 @@ private val breakdownTypes = listOf(TransactionType.EXPENSE, TransactionType.INC
 @Composable
 fun CategoryTab(
     viewModel: LedgerViewModel,
+    onOpenCategory: (categoryId: Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.categoryState.collectAsStateWithLifecycle()
@@ -96,7 +101,11 @@ fun CategoryTab(
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
                 items(state.totals, key = { it.categoryId }) { item ->
-                    CategoryRow(item = item, ratio = state.ratioOf(item))
+                    CategoryRow(
+                        item = item,
+                        ratio = state.ratioOf(item),
+                        onClick = { onOpenCategory(item.categoryId) },
+                    )
                 }
             }
         }
@@ -104,11 +113,12 @@ fun CategoryTab(
 }
 
 @Composable
-private fun CategoryRow(item: CategoryTotal, ratio: Float) {
+private fun CategoryRow(item: CategoryTotal, ratio: Float, onClick: () -> Unit) {
     val color = Color(item.colorArgb)
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClickLabel = "${item.name} 내역 보기", onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -140,6 +150,13 @@ private fun CategoryRow(item: CategoryTotal, ratio: Float) {
                 text = item.total.formatWon(),
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
+            )
+            // 눌러서 들어갈 수 있다는 표시. 없으면 합계만 보여주는 목록으로 읽힌다.
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Spacer(Modifier.height(6.dp))

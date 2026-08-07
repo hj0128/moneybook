@@ -18,6 +18,10 @@ interface CategoryDao {
     @Query("SELECT * FROM categories WHERE type = :type ORDER BY sort_order ASC, id ASC")
     fun observeByType(type: TransactionType): Flow<List<CategoryEntity>>
 
+    /** 상세 화면 제목용. 카테고리가 지워지면 null 이 흘러온다. */
+    @Query("SELECT * FROM categories WHERE id = :id")
+    fun observeById(id: Long): Flow<CategoryEntity?>
+
     @Insert
     suspend fun insert(category: CategoryEntity): Long
 

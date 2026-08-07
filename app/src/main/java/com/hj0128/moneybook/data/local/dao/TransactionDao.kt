@@ -81,6 +81,38 @@ interface TransactionDao {
         endEpochDay: Long,
     ): Flow<List<CategoryTotal>>
 
+    /**
+     * 카테고리 상세용. 한 카테고리의 기간 내 내역만 최신순으로.
+     *
+     * 카테고리는 그 자체로 수입용/지출용이 정해져 있어 type 조건이 따로 필요 없다.
+     * 이체는 category_id 가 null 이라 여기에도 걸리지 않는다.
+     */
+    @Query(
+        """
+        SELECT t.id AS id,
+               t.amount AS amount,
+               t.type AS type,
+               t.date_epoch_day AS date_epoch_day,
+               t.memo AS memo,
+               c.name AS category_name,
+               c.color_argb AS category_color,
+               a.name AS account_name,
+               ta.name AS to_account_name
+        FROM transactions AS t
+        LEFT JOIN categories AS c ON c.id = t.category_id
+        LEFT JOIN accounts AS a ON a.id = t.account_id
+        LEFT JOIN accounts AS ta ON ta.id = t.to_account_id
+        WHERE t.category_id = :categoryId
+          AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
+        ORDER BY t.date_epoch_day DESC, t.created_at DESC
+        """
+    )
+    fun observeByCategory(
+        categoryId: Long,
+        startEpochDay: Long,
+        endEpochDay: Long,
+    ): Flow<List<TransactionDetail>>
+
     @Query("SELECT * FROM transactions WHERE id = :id")
     suspend fun findById(id: Long): TransactionEntity?
 
