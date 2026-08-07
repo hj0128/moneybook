@@ -1,5 +1,6 @@
 package com.hj0128.moneybook
 
+import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.ledger.CategoryDetailUiState
@@ -81,6 +82,47 @@ class CategoryDetailTest {
         )
 
         assertEquals(1_000L, february.dailyAverage)
+    }
+
+    @Test
+    fun `소분류가 갈려 있을 때만 breakdown 을 낸다`() {
+        val split = CategoryDetailUiState(
+            yearMonth = august,
+            categoryName = "식비",
+            childTotals = listOf(
+                CategoryTotal(categoryId = 20, name = "외식", colorArgb = 0, total = 55_000, entryCount = 2),
+                CategoryTotal(categoryId = 21, name = "마트", colorArgb = 0, total = 20_500, entryCount = 1),
+            ),
+            groups = listOf(expense(75_500, LocalDate.of(2026, 8, 6))).toDayGroups(),
+        )
+        // 소분류를 안 만든 카테고리는 자기 자신 한 줄만 나온다. 합계 카드와 같은 숫자라 감춘다.
+        val flat = split.copy(
+            childTotals = listOf(
+                CategoryTotal(categoryId = 1, name = "식비", colorArgb = 0, total = 75_500, entryCount = 1),
+            ),
+        )
+
+        assertTrue(split.hasBreakdown)
+        assertEquals(false, flat.hasBreakdown)
+    }
+
+    @Test
+    fun `소분류 비중은 전체 합계 기준으로 센다`() {
+        val state = CategoryDetailUiState(
+            yearMonth = august,
+            childTotals = listOf(
+                CategoryTotal(categoryId = 20, name = "외식", colorArgb = 0, total = 30_000, entryCount = 1),
+                CategoryTotal(categoryId = 21, name = "마트", colorArgb = 0, total = 10_000, entryCount = 1),
+            ),
+            groups = listOf(
+                expense(30_000, LocalDate.of(2026, 8, 6)),
+                expense(10_000, LocalDate.of(2026, 8, 4)),
+            ).toDayGroups(),
+        )
+
+        assertEquals(40_000L, state.total)
+        assertEquals(0.75f, state.childRatioOf(state.childTotals[0]), 0.001f)
+        assertEquals(0.25f, state.childRatioOf(state.childTotals[1]), 0.001f)
     }
 
     @Test

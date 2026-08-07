@@ -58,6 +58,16 @@ class LedgerRepository(
         return transactionDao.observeByCategory(categoryId, start, end)
     }
 
+    /** 카테고리 상세의 소분류별 소계. 소분류가 없으면 한 줄만 나온다. */
+    fun observeChildTotals(
+        yearMonth: YearMonth,
+        categoryId: Long,
+    ): Flow<List<CategoryTotal>> {
+        val start = yearMonth.atDay(1).toEpochDay()
+        val end = yearMonth.atEndOfMonth().toEpochDay()
+        return transactionDao.observeChildTotals(categoryId, start, end)
+    }
+
     fun observeCategory(id: Long): Flow<CategoryEntity?> = categoryDao.observeById(id)
 
     fun observeCategories(type: TransactionType): Flow<List<CategoryEntity>> =

@@ -45,6 +45,7 @@ import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatWon
 import java.time.YearMonth
+import kotlin.math.roundToInt
 
 /**
  * 카테고리 상세: 카테고리별 탭에서 한 줄을 눌렀을 때 그 카테고리의 그 달 내역만 보여준다.
@@ -102,6 +103,10 @@ fun CategoryDetailScreen(
                 .fillMaxSize(),
         ) {
             CategoryDetailHeader(state)
+
+            if (state.hasBreakdown) {
+                ChildBreakdown(state)
+            }
 
             if (state.isEmpty) {
                 EmptyPlaceholder("${state.yearMonth.year}년 ${state.yearMonth.monthValue}월에는\n${state.categoryName} 내역이 없습니다.")
@@ -164,6 +169,68 @@ private fun CategoryDetailHeader(state: CategoryDetailUiState) {
                 value = state.dailyAverage.formatWon(),
                 color = MaterialTheme.colorScheme.onSurface,
             )
+        }
+    }
+}
+
+/**
+ * 소분류별 소계. "식비 75,500원" 다음에 "외식 55,000 / 마트 20,500" 을 보여주는 자리다.
+ *
+ * 이 화면의 존재 이유라서 목록보다 위에 둔다. 아래 내역은 개별 건을 확인하는 용도고,
+ * 어디에 쏠렸는지는 여기서 한눈에 끝나야 한다.
+ */
+@Composable
+private fun ChildBreakdown(state: CategoryDetailUiState) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Text(
+            text = "소분류",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        state.childTotals.forEach { child ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(Color(child.colorArgb)),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = child.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "${child.entryCount}건",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "${(state.childRatioOf(child) * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = child.total.formatWon(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }

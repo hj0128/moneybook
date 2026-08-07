@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hj0128.moneybook.appContainer
+import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.repository.LedgerRepository
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,8 +22,19 @@ data class CategoryDetailUiState(
     val categoryColor: Int? = null,
     val type: TransactionType = TransactionType.EXPENSE,
     val groups: List<DayGroup> = emptyList(),
+    /** 소분류별 소계. 대분류에 직접 붙은 거래도 한 줄로 들어 있다. */
+    val childTotals: List<CategoryTotal> = emptyList(),
 ) {
     val isEmpty: Boolean get() = groups.isEmpty()
+
+    /**
+     * 줄이 하나뿐이면 그 값이 곧 합계라 위 카드와 같은 숫자를 두 번 보여주는 꼴이다.
+     * 쪼개져 있을 때만 breakdown 을 낸다.
+     */
+    val hasBreakdown: Boolean get() = childTotals.size > 1
+
+    fun childRatioOf(item: CategoryTotal): Float =
+        if (total <= 0L) 0f else (item.total.toDouble() / total).toFloat()
 
     val entryCount: Int get() = groups.sumOf { it.items.size }
 
@@ -47,7 +59,8 @@ class CategoryDetailViewModel(
         combine(
             repository.observeCategoryTransactions(yearMonth, categoryId),
             repository.observeCategory(categoryId),
-        ) { items, category ->
+            repository.observeChildTotals(yearMonth, categoryId),
+        ) { items, category, childTotals ->
             CategoryDetailUiState(
                 yearMonth = yearMonth,
                 // 카테고리가 지워지면 이름을 못 읽는다. 화면이 비지 않게 기본값을 둔다.
@@ -55,6 +68,7 @@ class CategoryDetailViewModel(
                 categoryColor = category?.colorArgb,
                 type = category?.type ?: TransactionType.EXPENSE,
                 groups = items.toDayGroups(),
+                childTotals = childTotals,
             )
         }.stateIn(
             scope = viewModelScope,

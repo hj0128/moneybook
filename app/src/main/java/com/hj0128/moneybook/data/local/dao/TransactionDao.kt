@@ -59,19 +59,27 @@ interface TransactionDao {
     )
     fun observeMonthlyTotals(startEpochDay: Long, endEpochDay: Long): Flow<List<MonthTotal>>
 
-    /** 카테고리별 탭용. 이체는 category_id 가 없어 INNER JOIN 에서 자연히 빠진다. */
+    /**
+     * 카테고리별 탭용. 이체는 category_id 가 없어 INNER JOIN 에서 자연히 빠진다.
+     *
+     * 소분류에 붙은 거래는 부모 대분류로 합친다(식비/마트 + 식비/외식 -> 식비).
+     * 대분류에 직접 붙은 거래는 부모가 없으므로 자기 자신으로 묶인다.
+     */
     @Query(
         """
-        SELECT c.id AS category_id,
-               c.name AS name,
-               c.color_argb AS color_argb,
+        SELECT COALESCE(p.id, c.id) AS category_id,
+               COALESCE(p.name, c.name) AS name,
+               COALESCE(p.color_argb, c.color_argb) AS color_argb,
                SUM(t.amount) AS total,
                COUNT(t.id) AS entry_count
         FROM transactions AS t
         INNER JOIN categories AS c ON c.id = t.category_id
+        LEFT JOIN categories AS p ON p.id = c.parent_id
         WHERE t.type = :type
           AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
-        GROUP BY c.id, c.name, c.color_argb
+        GROUP BY COALESCE(p.id, c.id),
+                 COALESCE(p.name, c.name),
+                 COALESCE(p.color_argb, c.color_argb)
         ORDER BY total DESC
         """
     )
@@ -82,8 +90,36 @@ interface TransactionDao {
     ): Flow<List<CategoryTotal>>
 
     /**
+     * 카테고리 상세의 소분류 breakdown.
+     *
+     * 대분류에 직접 붙은 거래도 한 줄로 함께 나온다(그 대분류 이름 그대로).
+     * 소분류를 안 만든 카테고리면 결과가 한 줄뿐이라 화면에서 감춘다.
+     */
+    @Query(
+        """
+        SELECT c.id AS category_id,
+               c.name AS name,
+               c.color_argb AS color_argb,
+               SUM(t.amount) AS total,
+               COUNT(t.id) AS entry_count
+        FROM transactions AS t
+        INNER JOIN categories AS c ON c.id = t.category_id
+        WHERE (t.category_id = :categoryId OR c.parent_id = :categoryId)
+          AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
+        GROUP BY c.id, c.name, c.color_argb
+        ORDER BY total DESC
+        """
+    )
+    fun observeChildTotals(
+        categoryId: Long,
+        startEpochDay: Long,
+        endEpochDay: Long,
+    ): Flow<List<CategoryTotal>>
+
+    /**
      * 카테고리 상세용. 한 카테고리의 기간 내 내역만 최신순으로.
      *
+     * 대분류를 열면 그 아래 소분류에 붙은 거래까지 함께 나온다.
      * 카테고리는 그 자체로 수입용/지출용이 정해져 있어 type 조건이 따로 필요 없다.
      * 이체는 category_id 가 null 이라 여기에도 걸리지 않는다.
      */
@@ -102,7 +138,7 @@ interface TransactionDao {
         LEFT JOIN categories AS c ON c.id = t.category_id
         LEFT JOIN accounts AS a ON a.id = t.account_id
         LEFT JOIN accounts AS ta ON ta.id = t.to_account_id
-        WHERE t.category_id = :categoryId
+        WHERE (t.category_id = :categoryId OR c.parent_id = :categoryId)
           AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
         ORDER BY t.date_epoch_day DESC, t.created_at DESC
         """
