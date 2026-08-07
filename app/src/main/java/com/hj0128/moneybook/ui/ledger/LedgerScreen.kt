@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hj0128.moneybook.data.model.TransactionType
 import java.time.YearMonth
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,6 +39,7 @@ import java.time.YearMonth
 fun LedgerScreen(
     onAddTransaction: () -> Unit,
     onOpenCategory: (categoryId: Long, yearMonth: YearMonth) -> Unit,
+    onOpenUncategorized: (type: TransactionType, yearMonth: YearMonth) -> Unit,
     onManageCategories: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LedgerViewModel = viewModel(
@@ -46,6 +48,7 @@ fun LedgerScreen(
 ) {
     val tab by viewModel.tab.collectAsStateWithLifecycle()
     val yearMonth by viewModel.yearMonth.collectAsStateWithLifecycle()
+    val categoryType by viewModel.categoryType.collectAsStateWithLifecycle()
     var pendingDeleteId by remember { mutableStateOf<Long?>(null) }
 
     Scaffold(
@@ -101,6 +104,7 @@ fun LedgerScreen(
                     viewModel = viewModel,
                     // 상단에서 고른 달을 그대로 넘긴다. 상세는 그 달에 고정된다.
                     onOpenCategory = { categoryId -> onOpenCategory(categoryId, yearMonth) },
+                    onOpenUncategorized = { onOpenUncategorized(categoryType, yearMonth) },
                 )
             }
         }

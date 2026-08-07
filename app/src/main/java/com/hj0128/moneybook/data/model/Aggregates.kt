@@ -12,6 +12,15 @@ data class MonthTotal(
     val net: Long get() = income - expense
 }
 
+/** 카테고리가 빠진 거래의 합계. 0건이면 화면에 내지 않는다. */
+data class UncategorizedTotal(
+    @ColumnInfo(name = "entry_count")
+    val entryCount: Int,
+    val total: Long,
+) {
+    val isEmpty: Boolean get() = entryCount == 0
+}
+
 /** 카테고리별 탭에서 쓰는 카테고리 한 줄. */
 data class CategoryTotal(
     @ColumnInfo(name = "category_id")

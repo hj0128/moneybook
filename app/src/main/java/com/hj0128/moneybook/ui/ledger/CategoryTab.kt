@@ -1,6 +1,7 @@
 package com.hj0128.moneybook.ui.ledger
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.TransactionType
+import com.hj0128.moneybook.data.model.UncategorizedTotal
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatWon
 import androidx.compose.ui.graphics.Color
@@ -50,6 +52,7 @@ private val breakdownTypes = listOf(TransactionType.EXPENSE, TransactionType.INC
 fun CategoryTab(
     viewModel: LedgerViewModel,
     onOpenCategory: (categoryId: Long) -> Unit,
+    onOpenUncategorized: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.categoryState.collectAsStateWithLifecycle()
@@ -96,7 +99,7 @@ fun CategoryTab(
         }
         Spacer(Modifier.height(8.dp))
 
-        if (state.totals.isEmpty()) {
+        if (state.isEmpty) {
             EmptyPlaceholder("이 달에는 ${state.type.label} 내역이 없습니다.")
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
@@ -107,6 +110,94 @@ fun CategoryTab(
                         onClick = { onOpenCategory(item.categoryId) },
                     )
                 }
+                // 미분류는 항상 맨 아래. 정리해야 할 것이지 카테고리가 아니다.
+                if (!state.uncategorized.isEmpty) {
+                    item(key = "uncategorized") {
+                        UncategorizedRow(
+                            total = state.uncategorized,
+                            ratio = state.ratioOf(state.uncategorized.total),
+                            onClick = onOpenUncategorized,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 미분류 줄.
+ *
+ * 카테고리 색 대신 테두리만 있는 회색 점을 쓴다. 색을 주면 정상 카테고리처럼 보이는데,
+ * 이건 그냥 두면 안 되는 줄이라 다르게 보여야 한다.
+ */
+@Composable
+private fun UncategorizedRow(
+    total: UncategorizedTotal,
+    ratio: Float,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClickLabel = "미분류 내역 정리", onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "미분류",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = "${total.entryCount}건",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = "${(ratio * 100).roundToInt()}%",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = total.total.formatWon(),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            if (ratio > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(ratio.coerceIn(0f, 1f))
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(MaterialTheme.colorScheme.outline),
+                )
             }
         }
     }

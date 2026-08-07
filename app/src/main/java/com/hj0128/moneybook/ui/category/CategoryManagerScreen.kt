@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -344,6 +345,9 @@ private fun CategoryDeleteDialog(
     var selectedId by remember(target) {
         mutableLongStateOf(target.candidates.firstOrNull()?.id ?: 0L)
     }
+    // 지금 결정하기 어려우면 미분류로 미뤄둘 수 있다. 카테고리별 탭에 미분류 줄이
+    // 남으니 잊히지 않고, 거기서 여러 건을 골라 제자리로 나눠 보낼 수 있다.
+    var sendToUncategorized by remember(target) { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -355,9 +359,33 @@ private fun CategoryDeleteDialog(
                 } else {
                     Text(buildDeleteSummary(target))
                     Spacer(Modifier.height(12.dp))
-                    if (target.candidates.isEmpty()) {
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { sendToUncategorized = !sendToUncategorized }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = sendToUncategorized,
+                            onCheckedChange = { sendToUncategorized = it },
+                        )
                         Text(
-                            text = "옮길 카테고리가 없습니다. 먼저 다른 카테고리를 만들어 주세요.",
+                            text = "미분류로 보내고 나중에 정리",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+
+                    if (sendToUncategorized) {
+                        Text(
+                            text = "카테고리별 탭에 '미분류'로 남습니다. 거기서 여러 건을 골라 나눠 보낼 수 있습니다.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else if (target.candidates.isEmpty()) {
+                        Text(
+                            text = "옮길 카테고리가 없습니다. 미분류로 보내거나, 먼저 다른 카테고리를 만들어 주세요.",
                             color = MaterialTheme.colorScheme.error,
                         )
                     } else {
@@ -405,11 +433,10 @@ private fun CategoryDeleteDialog(
             }
         },
         confirmButton = {
+            val movesToCategory = target.usage.needsReassign && !sendToUncategorized
             TextButton(
-                onClick = {
-                    onConfirm(if (target.usage.needsReassign) selectedId else null)
-                },
-                enabled = !target.usage.needsReassign || target.candidates.isNotEmpty(),
+                onClick = { onConfirm(if (movesToCategory) selectedId else null) },
+                enabled = !movesToCategory || target.candidates.isNotEmpty(),
             ) { Text("삭제") }
         },
         dismissButton = {

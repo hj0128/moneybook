@@ -1,5 +1,6 @@
 package com.hj0128.moneybook.ui.navigation
 
+import android.os.Bundle
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -8,9 +9,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.category.CategoryManagerScreen
 import com.hj0128.moneybook.ui.entry.EntryScreen
 import com.hj0128.moneybook.ui.ledger.CategoryDetailScreen
+import com.hj0128.moneybook.ui.ledger.DetailSource
 import com.hj0128.moneybook.ui.ledger.LedgerScreen
 import java.time.YearMonth
 
@@ -29,6 +32,12 @@ object Routes {
 
     fun categoryDetail(categoryId: Long, yearMonth: YearMonth): String =
         "category/$categoryId/${yearMonth.year}/${yearMonth.monthValue}"
+
+    /** 미분류는 카테고리 id 가 없으니 수입/지출로 좁힌다. */
+    const val UNCATEGORIZED = "uncategorized/{type}/{year}/{month}"
+
+    fun uncategorized(type: TransactionType, yearMonth: YearMonth): String =
+        "uncategorized/${type.name}/${yearMonth.year}/${yearMonth.monthValue}"
 }
 
 @Composable
@@ -46,6 +55,9 @@ fun AppNavHost(
                 onAddTransaction = { navController.navigate(Routes.ENTRY) },
                 onOpenCategory = { categoryId, yearMonth ->
                     navController.navigate(Routes.categoryDetail(categoryId, yearMonth))
+                },
+                onOpenUncategorized = { type, yearMonth ->
+                    navController.navigate(Routes.uncategorized(type, yearMonth))
                 },
                 onManageCategories = { navController.navigate(Routes.CATEGORY_MANAGER) },
             )
@@ -70,13 +82,33 @@ fun AppNavHost(
         ) { backStackEntry ->
             val args = backStackEntry.arguments
             CategoryDetailScreen(
-                categoryId = args?.getLong("categoryId") ?: 0L,
-                yearMonth = YearMonth.of(
-                    args?.getInt("year") ?: YearMonth.now().year,
-                    args?.getInt("month") ?: YearMonth.now().monthValue,
-                ),
+                source = DetailSource.Category(args?.getLong("categoryId") ?: 0L),
+                yearMonth = args.toYearMonth(),
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            route = Routes.UNCATEGORIZED,
+            arguments = listOf(
+                navArgument("type") { type = NavType.StringType },
+                navArgument("year") { type = NavType.IntType },
+                navArgument("month") { type = NavType.IntType },
+            ),
+        ) { backStackEntry ->
+            val args = backStackEntry.arguments
+            val transactionType = runCatching {
+                TransactionType.valueOf(args?.getString("type").orEmpty())
+            }.getOrDefault(TransactionType.EXPENSE)
+            CategoryDetailScreen(
+                source = DetailSource.Uncategorized(transactionType),
+                yearMonth = args.toYearMonth(),
                 onBack = { navController.popBackStack() },
             )
         }
     }
 }
+
+private fun Bundle?.toYearMonth(): YearMonth = YearMonth.of(
+    this?.getInt("year") ?: YearMonth.now().year,
+    this?.getInt("month") ?: YearMonth.now().monthValue,
+)

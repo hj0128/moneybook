@@ -12,6 +12,7 @@ import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.MonthlySummary
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
+import com.hj0128.moneybook.data.model.UncategorizedTotal
 import com.hj0128.moneybook.data.prefs.SettingsRepository
 import com.hj0128.moneybook.data.repository.LedgerRepository
 import com.hj0128.moneybook.data.repository.toSummary
@@ -72,11 +73,23 @@ data class CategoryUiState(
     val yearMonth: YearMonth,
     val type: TransactionType = TransactionType.EXPENSE,
     val totals: List<CategoryTotal> = emptyList(),
+    /** 카테고리가 빠진 거래. 0건이면 화면에 내지 않는다. */
+    val uncategorized: UncategorizedTotal = UncategorizedTotal(entryCount = 0, total = 0L),
 ) {
-    val sum: Long get() = totals.sumOf { it.total }
+    /**
+     * 미분류까지 더한 진짜 합계.
+     *
+     * 카테고리 줄만 더하면 일별 탭의 지출 합계와 숫자가 어긋난다.
+     * 두 화면이 다른 값을 말하면 어느 쪽이 맞는지 알 수 없다.
+     */
+    val sum: Long get() = totals.sumOf { it.total } + uncategorized.total
 
-    fun ratioOf(item: CategoryTotal): Float =
-        if (sum <= 0L) 0f else (item.total.toDouble() / sum).toFloat()
+    val isEmpty: Boolean get() = totals.isEmpty() && uncategorized.isEmpty
+
+    fun ratioOf(item: CategoryTotal): Float = ratioOf(item.total)
+
+    fun ratioOf(amount: Long): Float =
+        if (sum <= 0L) 0f else (amount.toDouble() / sum).toFloat()
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -132,8 +145,12 @@ class LedgerViewModel(
     val categoryState: StateFlow<CategoryUiState> =
         combine(_yearMonth, _categoryType) { month, type -> month to type }
             .flatMapLatest { (month, type) ->
-                repository.observeCategoryTotals(month, type)
-                    .map { totals -> CategoryUiState(month, type, totals) }
+                combine(
+                    repository.observeCategoryTotals(month, type),
+                    repository.observeUncategorizedTotal(month, type),
+                ) { totals, uncategorized ->
+                    CategoryUiState(month, type, totals, uncategorized)
+                }
             }.stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),

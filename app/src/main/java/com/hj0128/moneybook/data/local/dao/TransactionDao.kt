@@ -10,6 +10,7 @@ import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
+import com.hj0128.moneybook.data.model.UncategorizedTotal
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -148,6 +149,59 @@ interface TransactionDao {
         startEpochDay: Long,
         endEpochDay: Long,
     ): Flow<List<TransactionDetail>>
+
+    /**
+     * 카테고리가 빠진 거래의 합계.
+     *
+     * 카테고리를 지우면서 미분류로 보낸 것들이다. 카테고리별 탭에서 이 줄을 감추면
+     * 일별 탭의 지출 합계와 카테고리 합계가 조용히 어긋나 사용자가 이유를 알 수 없다.
+     * 이체는 원래 카테고리가 없으므로 type 조건에서 걸러진다.
+     */
+    @Query(
+        """
+        SELECT COUNT(*) AS entry_count, COALESCE(SUM(amount), 0) AS total
+        FROM transactions
+        WHERE category_id IS NULL
+          AND type = :type
+          AND date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
+        """
+    )
+    fun observeUncategorizedTotal(
+        type: TransactionType,
+        startEpochDay: Long,
+        endEpochDay: Long,
+    ): Flow<UncategorizedTotal>
+
+    /** 미분류 상세용. 카테고리가 없으니 종류로 좁힌다. */
+    @Query(
+        """
+        SELECT t.id AS id,
+               t.amount AS amount,
+               t.type AS type,
+               t.date_epoch_day AS date_epoch_day,
+               t.memo AS memo,
+               NULL AS category_name,
+               NULL AS category_color,
+               a.name AS account_name,
+               ta.name AS to_account_name
+        FROM transactions AS t
+        LEFT JOIN accounts AS a ON a.id = t.account_id
+        LEFT JOIN accounts AS ta ON ta.id = t.to_account_id
+        WHERE t.category_id IS NULL
+          AND t.type = :type
+          AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
+        ORDER BY t.date_epoch_day DESC, t.created_at DESC
+        """
+    )
+    fun observeUncategorized(
+        type: TransactionType,
+        startEpochDay: Long,
+        endEpochDay: Long,
+    ): Flow<List<TransactionDetail>>
+
+    /** 일괄 재분류. 고른 내역을 한 카테고리로 옮긴다. */
+    @Query("UPDATE transactions SET category_id = :categoryId WHERE id IN (:ids)")
+    suspend fun assignCategory(ids: List<Long>, categoryId: Long)
 
     @Query("SELECT * FROM transactions WHERE id = :id")
     suspend fun findById(id: Long): TransactionEntity?

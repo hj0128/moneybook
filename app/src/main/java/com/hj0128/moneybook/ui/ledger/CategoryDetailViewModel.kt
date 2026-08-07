@@ -6,15 +6,31 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hj0128.moneybook.appContainer
+import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.repository.LedgerRepository
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.YearMonth
+
+/** 이 화면이 무엇을 보고 있는지. 카테고리 하나이거나, 카테고리가 빠진 것들이거나. */
+sealed interface DetailSource {
+    data class Category(val id: Long) : DetailSource
+
+    /** 미분류. 카테고리가 없으니 수입/지출로 좁힌다. */
+    data class Uncategorized(val type: TransactionType) : DetailSource
+}
 
 data class CategoryDetailUiState(
     val yearMonth: YearMonth,
@@ -49,17 +65,30 @@ data class CategoryDetailUiState(
     val dailyAverage: Long get() = total / yearMonth.lengthOfMonth()
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class CategoryDetailViewModel(
     private val repository: LedgerRepository,
-    private val categoryId: Long,
+    val source: DetailSource,
     yearMonth: YearMonth,
 ) : ViewModel() {
 
-    val state: StateFlow<CategoryDetailUiState> =
-        combine(
-            repository.observeCategoryTransactions(yearMonth, categoryId),
-            repository.observeCategory(categoryId),
-            repository.observeChildTotals(yearMonth, categoryId),
+    /**
+     * 선택 모드는 상단바 버튼으로만 켠다.
+     *
+     * 길게 누르기로 켜면 일별 탭에서는 삭제인 동작이 여기서는 선택이 되어,
+     * 같은 목록인데 화면마다 다르게 반응한다.
+     */
+    private val _selectionMode = MutableStateFlow(false)
+    val selectionMode: StateFlow<Boolean> = _selectionMode.asStateFlow()
+
+    private val _selectedIds = MutableStateFlow<Set<Long>>(emptySet())
+    val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
+
+    val state: StateFlow<CategoryDetailUiState> = when (source) {
+        is DetailSource.Category -> combine(
+            repository.observeCategoryTransactions(yearMonth, source.id),
+            repository.observeCategory(source.id),
+            repository.observeChildTotals(yearMonth, source.id),
         ) { items, category, childTotals ->
             CategoryDetailUiState(
                 yearMonth = yearMonth,
@@ -70,23 +99,74 @@ class CategoryDetailViewModel(
                 groups = items.toDayGroups(),
                 childTotals = childTotals,
             )
-        }.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = CategoryDetailUiState(yearMonth),
-        )
+        }
+
+        is DetailSource.Uncategorized -> repository.observeUncategorized(yearMonth, source.type)
+            .map { items ->
+                CategoryDetailUiState(
+                    yearMonth = yearMonth,
+                    categoryName = "미분류",
+                    categoryColor = null,
+                    type = source.type,
+                    groups = items.toDayGroups(),
+                )
+            }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = CategoryDetailUiState(yearMonth),
+    )
+
+    /** 재분류로 보낼 수 있는 카테고리. 소분류까지 전부 나온다. */
+    val assignableCategories: StateFlow<List<CategoryEntity>> =
+        state.map { it.type }.distinctUntilChanged()
+            .flatMapLatest { type -> repository.observeCategories(type) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
+
+    fun startSelection() {
+        _selectionMode.value = true
+    }
+
+    fun toggleSelection(id: Long) {
+        _selectedIds.update { current ->
+            if (id in current) current - id else current + id
+        }
+    }
+
+    fun exitSelection() {
+        _selectionMode.value = false
+        _selectedIds.value = emptySet()
+    }
+
+    fun selectAll() {
+        _selectedIds.value = state.value.groups.flatMap { group -> group.items.map { it.id } }.toSet()
+    }
+
+    /** 고른 내역을 한 카테고리로 옮긴다. 옮기고 나면 선택 모드를 끝낸다. */
+    fun assignSelected(categoryId: Long) {
+        val ids = _selectedIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.assignCategory(ids, categoryId)
+            exitSelection()
+        }
+    }
 
     fun delete(id: Long) {
         viewModelScope.launch { repository.deleteTransaction(id) }
     }
 
     companion object {
-        fun factory(categoryId: Long, yearMonth: YearMonth): ViewModelProvider.Factory =
+        fun factory(source: DetailSource, yearMonth: YearMonth): ViewModelProvider.Factory =
             viewModelFactory {
                 initializer {
                     CategoryDetailViewModel(
                         repository = appContainer().ledgerRepository,
-                        categoryId = categoryId,
+                        source = source,
                         yearMonth = yearMonth,
                     )
                 }

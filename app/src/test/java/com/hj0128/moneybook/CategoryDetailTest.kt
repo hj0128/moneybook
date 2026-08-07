@@ -3,7 +3,9 @@ package com.hj0128.moneybook
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
+import com.hj0128.moneybook.data.model.UncategorizedTotal
 import com.hj0128.moneybook.ui.ledger.CategoryDetailUiState
+import com.hj0128.moneybook.ui.ledger.CategoryUiState
 import com.hj0128.moneybook.ui.ledger.toDayGroups
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -123,6 +125,40 @@ class CategoryDetailTest {
         assertEquals(40_000L, state.total)
         assertEquals(0.75f, state.childRatioOf(state.childTotals[0]), 0.001f)
         assertEquals(0.25f, state.childRatioOf(state.childTotals[1]), 0.001f)
+    }
+
+    @Test
+    fun `카테고리별 합계는 미분류까지 더한다`() {
+        // 카테고리 줄만 더하면 일별 탭의 지출 합계와 숫자가 어긋난다.
+        val state = CategoryUiState(
+            yearMonth = august,
+            totals = listOf(
+                CategoryTotal(categoryId = 1, name = "식비", colorArgb = 0, total = 75_500, entryCount = 4),
+                CategoryTotal(categoryId = 2, name = "교통", colorArgb = 0, total = 1_500, entryCount = 1),
+            ),
+            uncategorized = UncategorizedTotal(entryCount = 2, total = 23_000),
+        )
+
+        assertEquals(100_000L, state.sum)
+        assertEquals(0.23f, state.ratioOf(23_000L), 0.001f)
+        assertEquals(false, state.isEmpty)
+    }
+
+    @Test
+    fun `미분류만 있어도 빈 화면이 아니다`() {
+        val state = CategoryUiState(
+            yearMonth = august,
+            totals = emptyList(),
+            uncategorized = UncategorizedTotal(entryCount = 3, total = 9_000),
+        )
+
+        assertEquals(false, state.isEmpty)
+        assertEquals(9_000L, state.sum)
+    }
+
+    @Test
+    fun `카테고리도 미분류도 없으면 빈 화면`() {
+        assertTrue(CategoryUiState(yearMonth = august).isEmpty)
     }
 
     @Test

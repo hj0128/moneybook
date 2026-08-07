@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -124,12 +125,20 @@ fun DayHeader(group: DayGroup) {
     }
 }
 
-/** 내역 한 줄. 길게 누르면 삭제를 요청한다. */
+/**
+ * 내역 한 줄. 길게 누르면 삭제를 요청한다.
+ *
+ * [selectionMode] 가 켜지면 색 점 자리에 체크박스가 들어서고 탭이 선택 토글이 된다.
+ * 기본값이 꺼짐이라 일별 탭은 예전과 똑같이 동작한다.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TransactionRow(
     item: TransactionDetail,
     onLongClick: () -> Unit,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onClick: () -> Unit = {},
 ) {
     val ledgerColors = LocalLedgerColors.current
     val amountColor = when (item.type) {
@@ -146,19 +155,37 @@ fun TransactionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = {}, onLongClick = onLongClick)
+            .then(
+                if (selected) {
+                    Modifier.background(MaterialTheme.colorScheme.secondaryContainer)
+                } else {
+                    Modifier
+                }
+            )
+            .combinedClickable(
+                onClick = { if (selectionMode) onClick() },
+                onLongClick = onLongClick,
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(
-                    item.categoryColor?.let { Color(it) }
-                        ?: MaterialTheme.colorScheme.outline
-                ),
-        )
+        if (selectionMode) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onClick() },
+                modifier = Modifier.size(20.dp),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(
+                        item.categoryColor?.let { Color(it) }
+                            ?: MaterialTheme.colorScheme.outline
+                    ),
+            )
+        }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(

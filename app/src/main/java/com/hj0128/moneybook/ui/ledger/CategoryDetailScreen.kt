@@ -1,6 +1,8 @@
 package com.hj0128.moneybook.ui.ledger
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,14 +12,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -26,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatWon
@@ -56,42 +66,72 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryDetailScreen(
-    categoryId: Long,
+    source: DetailSource,
     yearMonth: YearMonth,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: CategoryDetailViewModel = viewModel(
-        factory = CategoryDetailViewModel.factory(categoryId, yearMonth)
+        factory = CategoryDetailViewModel.factory(source, yearMonth)
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val inSelectionMode by viewModel.selectionMode.collectAsStateWithLifecycle()
+    val selectedIds by viewModel.selectedIds.collectAsStateWithLifecycle()
+    val assignable by viewModel.assignableCategories.collectAsStateWithLifecycle()
     var pendingDeleteId by remember { mutableStateOf<Long?>(null) }
+    var showAssignSheet by remember { mutableStateOf(false) }
+
+    // 선택 모드에서 뒤로가기는 화면을 나가는 대신 선택을 푼다.
+    BackHandler(enabled = inSelectionMode) { viewModel.exitSelection() }
 
     Scaffold(
         modifier = modifier,
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                    IconButton(
+                        onClick = { if (inSelectionMode) viewModel.exitSelection() else onBack() },
+                    ) {
+                        if (inSelectionMode) {
+                            Icon(Icons.Default.Close, contentDescription = "선택 해제")
+                        } else {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                        }
                     }
                 },
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        state.categoryColor?.let { argb ->
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(argb)),
+                    if (inSelectionMode) {
+                        Text("${selectedIds.size}건 선택")
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            state.categoryColor?.let { argb ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(argb)),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(
+                                text = "${state.yearMonth.monthValue}월 · ${state.categoryName}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
-                            Spacer(Modifier.width(8.dp))
                         }
-                        Text(
-                            text = "${state.yearMonth.monthValue}월 · ${state.categoryName}",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                    }
+                },
+                actions = {
+                    if (inSelectionMode) {
+                        TextButton(onClick = viewModel::selectAll) { Text("전체") }
+                        TextButton(
+                            onClick = { showAssignSheet = true },
+                            enabled = selectedIds.isNotEmpty(),
+                        ) { Text("옮기기") }
+                    } else if (!state.isEmpty) {
+                        IconButton(onClick = viewModel::startSelection) {
+                            Icon(Icons.Default.Checklist, contentDescription = "선택해서 옮기기")
+                        }
                     }
                 },
             )
@@ -119,13 +159,35 @@ fun CategoryDetailScreen(
                         items(group.items, key = { it.id }) { item ->
                             TransactionRow(
                                 item = item,
-                                onLongClick = { pendingDeleteId = item.id },
+                                selectionMode = inSelectionMode,
+                                selected = item.id in selectedIds,
+                                onClick = { viewModel.toggleSelection(item.id) },
+                                // 선택 모드에서는 길게 눌러도 삭제되지 않는다. 실수로 지우기 쉽다.
+                                onLongClick = {
+                                    if (inSelectionMode) {
+                                        viewModel.toggleSelection(item.id)
+                                    } else {
+                                        pendingDeleteId = item.id
+                                    }
+                                },
                             )
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showAssignSheet) {
+        AssignCategoryDialog(
+            categories = assignable,
+            count = selectedIds.size,
+            onDismiss = { showAssignSheet = false },
+            onSelect = { categoryId ->
+                viewModel.assignSelected(categoryId)
+                showAssignSheet = false
+            },
+        )
     }
 
     pendingDeleteId?.let { id ->
@@ -233,6 +295,64 @@ private fun ChildBreakdown(state: CategoryDetailUiState) {
             }
         }
     }
+}
+
+/**
+ * 고른 내역을 어느 카테고리로 옮길지 고른다.
+ *
+ * 소분류까지 전부 평평하게 낸다. 여기서 트리를 다시 그리면 다이얼로그가 길어지고,
+ * 어차피 옮길 곳은 대개 소분류다.
+ */
+@Composable
+private fun AssignCategoryDialog(
+    categories: List<CategoryEntity>,
+    count: Int,
+    onDismiss: () -> Unit,
+    onSelect: (Long) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${count}건을 옮길 카테고리") },
+        text = {
+            if (categories.isEmpty()) {
+                Text("옮길 카테고리가 없습니다.")
+            } else {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    categories.forEach { category ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(category.id) }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    // 소분류는 들여써서 어디 밑인지 보이게 한다.
+                                    .padding(start = if (category.isTopLevel) 0.dp else 20.dp)
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(category.colorArgb)),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = category.name,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        },
+    )
 }
 
 @Composable

@@ -11,6 +11,7 @@ import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.MonthlySummary
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
+import com.hj0128.moneybook.data.model.UncategorizedTotal
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.time.LocalDate
@@ -66,6 +67,30 @@ class LedgerRepository(
         val start = yearMonth.atDay(1).toEpochDay()
         val end = yearMonth.atEndOfMonth().toEpochDay()
         return transactionDao.observeChildTotals(categoryId, start, end)
+    }
+
+    fun observeUncategorizedTotal(
+        yearMonth: YearMonth,
+        type: TransactionType,
+    ): Flow<UncategorizedTotal> {
+        val start = yearMonth.atDay(1).toEpochDay()
+        val end = yearMonth.atEndOfMonth().toEpochDay()
+        return transactionDao.observeUncategorizedTotal(type, start, end)
+    }
+
+    fun observeUncategorized(
+        yearMonth: YearMonth,
+        type: TransactionType,
+    ): Flow<List<TransactionDetail>> {
+        val start = yearMonth.atDay(1).toEpochDay()
+        val end = yearMonth.atEndOfMonth().toEpochDay()
+        return transactionDao.observeUncategorized(type, start, end)
+    }
+
+    /** 고른 내역을 한 카테고리로 옮긴다. */
+    suspend fun assignCategory(transactionIds: List<Long>, categoryId: Long) {
+        if (transactionIds.isEmpty()) return
+        transactionDao.assignCategory(transactionIds, categoryId)
     }
 
     fun observeCategory(id: Long): Flow<CategoryEntity?> = categoryDao.observeById(id)
