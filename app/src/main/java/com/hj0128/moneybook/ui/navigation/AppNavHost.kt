@@ -8,6 +8,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.hj0128.moneybook.ui.category.CategoryManagerScreen
 import com.hj0128.moneybook.ui.entry.EntryScreen
 import com.hj0128.moneybook.ui.ledger.CategoryDetailScreen
 import com.hj0128.moneybook.ui.ledger.LedgerScreen
@@ -16,6 +17,7 @@ import java.time.YearMonth
 object Routes {
     const val LEDGER = "ledger"
     const val ENTRY = "entry"
+    const val CATEGORY_MANAGER = "categories"
 
     /**
      * 카테고리 상세. 보고 있던 달을 같이 넘긴다.
@@ -45,7 +47,11 @@ fun AppNavHost(
                 onOpenCategory = { categoryId, yearMonth ->
                     navController.navigate(Routes.categoryDetail(categoryId, yearMonth))
                 },
+                onManageCategories = { navController.navigate(Routes.CATEGORY_MANAGER) },
             )
+        }
+        composable(Routes.CATEGORY_MANAGER) {
+            CategoryManagerScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.ENTRY) {
             EntryScreen(

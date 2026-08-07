@@ -75,6 +75,65 @@ class LedgerRepository(
 
     fun observeAccounts(): Flow<List<AccountBalance>> = accountDao.observeBalances()
 
+    // ---- 카테고리 관리 ----
+
+    /** 이 카테고리에 직접 붙은 거래 수와 소분류 수. 삭제 전 이전이 필요한지 판단한다. */
+    suspend fun categoryUsage(categoryId: Long): CategoryUsage = CategoryUsage(
+        directTransactions = categoryDao.countDirectUsage(categoryId),
+        children = categoryDao.countChildren(categoryId),
+    )
+
+    /**
+     * 카테고리 추가. 같은 부모 밑에 같은 이름이 있으면 거부한다.
+     *
+     * 이름이 같은 카테고리가 둘이면 목록에서도 통계에서도 어느 쪽인지 알 수 없다.
+     */
+    suspend fun addCategory(
+        name: String,
+        type: TransactionType,
+        colorArgb: Int,
+        parentId: Long?,
+    ): Result<Long> {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("이름을 입력해 주세요."))
+        if (categoryDao.countSameName(type, trimmed, parentId, excludeId = 0L) > 0) {
+            return Result.failure(IllegalArgumentException("같은 이름이 이미 있습니다."))
+        }
+        val id = categoryDao.insert(
+            CategoryEntity(
+                name = trimmed,
+                type = type,
+                colorArgb = colorArgb,
+                sortOrder = categoryDao.nextSortOrder(type, parentId),
+                parentId = parentId,
+            )
+        )
+        return Result.success(id)
+    }
+
+    /** 이름과 색만 고친다. 부모와 종류는 바꾸지 않는다(바꾸면 과거 집계가 통째로 달라진다). */
+    suspend fun renameCategory(id: Long, name: String, colorArgb: Int): Result<Unit> {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("이름을 입력해 주세요."))
+        val current = categoryDao.findById(id)
+            ?: return Result.failure(IllegalStateException("카테고리를 찾을 수 없습니다."))
+        if (categoryDao.countSameName(current.type, trimmed, current.parentId, excludeId = id) > 0) {
+            return Result.failure(IllegalArgumentException("같은 이름이 이미 있습니다."))
+        }
+        categoryDao.update(current.copy(name = trimmed, colorArgb = colorArgb))
+        return Result.success(Unit)
+    }
+
+    /**
+     * 카테고리 삭제.
+     *
+     * [reassignToId] 가 있으면 이 카테고리에 직접 붙은 거래를 그쪽으로 옮기고,
+     * 소분류가 있으면 소분류째로 그 밑에 붙인다. 쓰인 적도 없고 소분류도 없으면 null 로 부른다.
+     */
+    suspend fun deleteCategory(id: Long, reassignToId: Long?) {
+        categoryDao.deleteWithReassign(id, reassignToId)
+    }
+
     suspend fun addTransaction(
         amount: Long,
         type: TransactionType,
@@ -106,6 +165,15 @@ class LedgerRepository(
     }
 
     suspend fun deleteTransaction(id: Long) = transactionDao.deleteById(id)
+}
+
+/** 삭제 다이얼로그가 무엇을 물어봐야 할지 정하는 근거. */
+data class CategoryUsage(
+    val directTransactions: Int,
+    val children: Int,
+) {
+    /** 옮길 것이 없으면 이전 대상을 묻지 않고 바로 지운다. */
+    val needsReassign: Boolean get() = directTransactions > 0 || children > 0
 }
 
 /** 이체는 자산 간 이동이라 수입/지출 어느 쪽에도 더하지 않는다. */

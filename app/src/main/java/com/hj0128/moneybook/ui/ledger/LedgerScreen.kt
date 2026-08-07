@@ -8,6 +8,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -35,6 +38,7 @@ import java.time.YearMonth
 fun LedgerScreen(
     onAddTransaction: () -> Unit,
     onOpenCategory: (categoryId: Long, yearMonth: YearMonth) -> Unit,
+    onManageCategories: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LedgerViewModel = viewModel(
         factory = LedgerViewModel.factory(YearMonth.now())
@@ -58,6 +62,9 @@ fun LedgerScreen(
                         onPrevious = viewModel::showPrevious,
                         onNext = viewModel::showNext,
                     )
+                },
+                actions = {
+                    OverflowMenu(onManageCategories = onManageCategories)
                 },
             )
         },
@@ -106,6 +113,28 @@ fun LedgerScreen(
                 pendingDeleteId = null
             },
             onDismiss = { pendingDeleteId = null },
+        )
+    }
+}
+
+/** 설정거리가 카테고리 관리 하나뿐이라 화면을 따로 두지 않고 여기에 단다. */
+@Composable
+private fun OverflowMenu(onManageCategories: () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+
+    IconButton(onClick = { expanded = true }) {
+        Icon(Icons.Default.MoreVert, contentDescription = "메뉴")
+    }
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = { expanded = false },
+    ) {
+        DropdownMenuItem(
+            text = { Text("카테고리 관리") },
+            onClick = {
+                expanded = false
+                onManageCategories()
+            },
         )
     }
 }
