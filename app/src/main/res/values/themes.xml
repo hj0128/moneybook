@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      색상은 Compose 의 MoneyBookTheme 이 담당한다.
+      여기 XML 테마는 앱이 뜨는 순간 잠깐 보이는 창(window) 배경만 정의한다.
+    -->
+    <style name="Theme.MoneyBook" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+</resources>

@@ -1,0 +1,14 @@
+*.iml
+.gradle
+/local.properties
+# IDE settings (local absolute paths / machine-specific config)
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Claude Code local settings
+.claude/settings.local.json
