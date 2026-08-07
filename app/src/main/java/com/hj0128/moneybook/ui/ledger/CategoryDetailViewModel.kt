@@ -24,6 +24,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.YearMonth
 
+/** 재분류 후보 한 줄. [parentName] 은 소분류일 때만 채워진다. */
+data class AssignableCategory(
+    val category: CategoryEntity,
+    val parentName: String?,
+) {
+    val label: String get() = parentName?.let { "$it > ${category.name}" } ?: category.name
+}
+
 /** 이 화면이 무엇을 보고 있는지. 카테고리 하나이거나, 카테고리가 빠진 것들이거나. */
 sealed interface DetailSource {
     data class Category(val id: Long) : DetailSource
@@ -117,10 +125,26 @@ class CategoryDetailViewModel(
         initialValue = CategoryDetailUiState(yearMonth),
     )
 
-    /** 재분류로 보낼 수 있는 카테고리. 소분류까지 전부 나온다. */
-    val assignableCategories: StateFlow<List<CategoryEntity>> =
+    /**
+     * 재분류로 보낼 수 있는 카테고리.
+     *
+     * 입력 화면과 같은 규칙을 쓴다. 소분류가 있는 대분류는 후보에서 빠진다.
+     * 정리하려고 연 화면에서 다시 애매한 자리로 보낼 수 있으면 정리가 안 된다.
+     */
+    val assignableCategories: StateFlow<List<AssignableCategory>> =
         state.map { it.type }.distinctUntilChanged()
-            .flatMapLatest { type -> repository.observeCategories(type) }
+            .flatMapLatest { type -> repository.observeCategoryTree(type) }
+            .map { nodes ->
+                nodes.flatMap { node ->
+                    node.selectable.map { category ->
+                        AssignableCategory(
+                            category = category,
+                            // 소분류면 어느 대분류 밑인지 같이 보여준다. 이름만으로는 헷갈린다.
+                            parentName = node.category.name.takeIf { node.hasChildren },
+                        )
+                    }
+                }
+            }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),

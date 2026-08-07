@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hj0128.moneybook.appContainer
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
+import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.repository.CategoryUsage
 import com.hj0128.moneybook.data.repository.LedgerRepository
@@ -20,12 +21,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-
-/** 대분류 하나와 그 밑 소분류들. 화면은 이 묶음을 그대로 그린다. */
-data class CategoryNode(
-    val category: CategoryEntity,
-    val children: List<CategoryEntity>,
-)
 
 /** 편집/추가 다이얼로그가 열려 있을 때의 대상. */
 sealed interface CategoryEditTarget {
@@ -72,8 +67,8 @@ class CategoryManagerViewModel(
 
     val state: StateFlow<CategoryManagerUiState> =
         _type.flatMapLatest { type ->
-            repository.observeCategories(type).map { flat ->
-                CategoryManagerUiState(type = type, nodes = flat.toNodes())
+            repository.observeCategoryTree(type).map { nodes ->
+                CategoryManagerUiState(type = type, nodes = nodes)
             }
         }.stateIn(
             scope = viewModelScope,
@@ -167,18 +162,3 @@ class CategoryManagerViewModel(
     }
 }
 
-/**
- * 평평한 목록을 대분류 > 소분류로 묶는다.
- *
- * 부모가 사라진 소분류(경쟁 조건 등)는 버리지 않고 대분류로 올려서 보여준다.
- * 화면에서 사라지면 사용자는 지울 방법조차 없어진다.
- */
-internal fun List<CategoryEntity>.toNodes(): List<CategoryNode> {
-    val byParent = filterNot { it.isTopLevel }.groupBy { it.parentId }
-    val topLevelIds = filter { it.isTopLevel }.map { it.id }.toSet()
-    val orphans = filterNot { it.isTopLevel }.filter { it.parentId !in topLevelIds }
-
-    return (filter { it.isTopLevel } + orphans).map { parent ->
-        CategoryNode(category = parent, children = byParent[parent.id].orEmpty())
-    }
-}

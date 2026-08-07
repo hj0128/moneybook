@@ -6,9 +6,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hj0128.moneybook.appContainer
-import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.AccountBalance
+import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.TransactionType
+import com.hj0128.moneybook.data.model.flatten
 import com.hj0128.moneybook.data.repository.LedgerRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +26,8 @@ data class EntryUiState(
     val amountText: String = "",
     val date: LocalDate = LocalDate.now(),
     val memo: String = "",
-    val categories: List<CategoryEntity> = emptyList(),
+    /** 대분류 > 소분류로 묶은 카테고리. 화면은 묶음 그대로 그린다. */
+    val categoryNodes: List<CategoryNode> = emptyList(),
     val selectedCategoryId: Long? = null,
     val accounts: List<AccountBalance> = emptyList(),
     val selectedAccountId: Long? = null,
@@ -75,16 +77,16 @@ class EntryViewModel(
     private fun observeCategories(type: TransactionType) {
         categoryJob?.cancel()
         if (type == TransactionType.TRANSFER) {
-            _uiState.update { it.copy(categories = emptyList(), selectedCategoryId = null) }
+            _uiState.update { it.copy(categoryNodes = emptyList(), selectedCategoryId = null) }
             return
         }
         categoryJob = viewModelScope.launch {
-            repository.observeCategories(type).collect { categories ->
+            repository.observeCategoryTree(type).collect { nodes ->
                 _uiState.update { state ->
-                    // 종류를 바꾸면 이전 카테고리 선택은 무효다.
-                    val stillValid = categories.any { it.id == state.selectedCategoryId }
+                    // 종류를 바꾸거나 고른 카테고리가 지워지면 선택은 무효다.
+                    val stillValid = nodes.flatten().any { it.id == state.selectedCategoryId }
                     state.copy(
-                        categories = categories,
+                        categoryNodes = nodes,
                         selectedCategoryId = if (stillValid) state.selectedCategoryId else null,
                     )
                 }

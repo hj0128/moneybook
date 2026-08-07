@@ -6,8 +6,10 @@ import com.hj0128.moneybook.data.local.dao.TransactionDao
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.local.entity.TransactionEntity
 import com.hj0128.moneybook.data.model.AccountBalance
+import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.MonthTotal
+import com.hj0128.moneybook.data.model.toNodes
 import com.hj0128.moneybook.data.model.MonthlySummary
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
@@ -97,6 +99,10 @@ class LedgerRepository(
 
     fun observeCategories(type: TransactionType): Flow<List<CategoryEntity>> =
         categoryDao.observeByType(type)
+
+    /** 대분류 > 소분류로 묶은 카테고리. 관리 화면과 입력 화면이 같이 쓴다. */
+    fun observeCategoryTree(type: TransactionType): Flow<List<CategoryNode>> =
+        categoryDao.observeByType(type).map { it.toNodes() }
 
     fun observeAccounts(): Flow<List<AccountBalance>> = accountDao.observeBalances()
 

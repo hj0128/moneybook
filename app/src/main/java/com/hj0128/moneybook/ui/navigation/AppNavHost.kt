@@ -70,6 +70,8 @@ fun AppNavHost(
                 onClose = { navController.popBackStack() },
                 // 저장 후에도 목록으로 돌아간다. 목록은 Flow 라서 따로 새로고침할 필요가 없다.
                 onSaved = { navController.popBackStack() },
+                // 관리 화면에서 뒤로 오면 입력하던 내용이 그대로 남아 있어야 한다.
+                onManageCategories = { navController.navigate(Routes.CATEGORY_MANAGER) },
             )
         }
         composable(

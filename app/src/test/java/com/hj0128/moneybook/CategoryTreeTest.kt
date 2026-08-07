@@ -2,7 +2,8 @@ package com.hj0128.moneybook
 
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.TransactionType
-import com.hj0128.moneybook.ui.category.toNodes
+import com.hj0128.moneybook.data.model.flatten
+import com.hj0128.moneybook.data.model.toNodes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -58,5 +59,26 @@ class CategoryTreeTest {
     @Test
     fun `빈 목록은 빈 트리`() {
         assertTrue(emptyList<CategoryEntity>().toNodes().isEmpty())
+    }
+
+    @Test
+    fun `소분류가 있으면 대분류는 고를 수 없다`() {
+        val nodes = listOf(
+            category(1, "식비"),
+            category(2, "교통"),
+            category(10, "외식", parentId = 1),
+            category(11, "마트", parentId = 1),
+        ).toNodes()
+
+        // 식비는 빠지고 그 소분류만 남는다. 교통은 소분류가 없어 자기 자신이 리프다.
+        assertEquals(listOf("외식", "마트", "교통"), nodes.flatten().map { it.name })
+    }
+
+    @Test
+    fun `소분류가 없는 대분류는 자기 자신이 리프다`() {
+        val nodes = listOf(category(1, "식비")).toNodes()
+
+        assertEquals(listOf("식비"), nodes.flatten().map { it.name })
+        assertEquals(false, nodes[0].hasChildren)
     }
 }

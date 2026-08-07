@@ -16,8 +16,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -54,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hj0128.moneybook.data.local.entity.CategoryEntity
+import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatAmount
@@ -73,6 +77,7 @@ private val entryTypes = listOf(
 fun EntryScreen(
     onClose: () -> Unit,
     onSaved: () -> Unit,
+    onManageCategories: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: EntryViewModel = viewModel(factory = EntryViewModel.Factory),
 ) {
@@ -136,19 +141,12 @@ fun EntryScreen(
                     )
                 } else {
                     SectionLabel("카테고리")
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        state.categories.forEach { category ->
-                            FilterChip(
-                                selected = category.id == state.selectedCategoryId,
-                                onClick = { viewModel.selectCategory(category.id) },
-                                label = { Text(category.name) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color(category.colorArgb)
-                                        .copy(alpha = 0.25f),
-                                ),
-                            )
-                        }
-                    }
+                    CategoryChips(
+                        nodes = state.categoryNodes,
+                        selectedId = state.selectedCategoryId,
+                        onSelect = viewModel::selectCategory,
+                        onManage = onManageCategories,
+                    )
                     SectionLabel("자산")
                     AccountChips(
                         state = state,
@@ -262,6 +260,79 @@ private fun SectionLabel(text: String) {
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+    )
+}
+
+/**
+ * 카테고리 칩.
+ *
+ * 2뎁스지만 고르는 건 언제나 탭 한 번이다. 대분류를 누르고 소분류를 또 누르게 하면
+ * 입력이 두 배로 귀찮아지는데, 가계부는 입력이 귀찮아지는 순간 안 쓰게 된다.
+ * 그래서 소분류를 전부 펼쳐 놓고 대분류는 머리글로만 쓴다.
+ *
+ * 소분류가 없는 대분류는 머리글 없이 한 줄에 모은다. 머리글 하나에 칩 하나씩
+ * 늘어놓으면 세로로 길어지기만 하고 묶어주는 값어치가 없다.
+ */
+@Composable
+private fun CategoryChips(
+    nodes: List<CategoryNode>,
+    selectedId: Long?,
+    onSelect: (Long) -> Unit,
+    onManage: () -> Unit,
+) {
+    val grouped = nodes.filter { it.children.isNotEmpty() }
+    val standalone = nodes.filter { it.children.isEmpty() }.map { it.category }
+
+    grouped.forEach { node ->
+        Text(
+            text = node.category.name,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 소분류가 있으면 소분류만 고른다. 대분류는 머리글 역할만 한다.
+            node.selectable.forEach { category ->
+                CategoryChip(category, category.id == selectedId, onSelect)
+            }
+        }
+    }
+
+    if (standalone.isNotEmpty() || grouped.isNotEmpty()) {
+        if (grouped.isNotEmpty()) Spacer(Modifier.height(8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            standalone.forEach { category ->
+                CategoryChip(category, category.id == selectedId, onSelect)
+            }
+            // 쓰려던 카테고리가 없을 때 여기서 바로 만들러 갈 수 있다.
+            AssistChip(
+                onClick = onManage,
+                label = { Text("관리") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.height(18.dp),
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CategoryChip(
+    category: CategoryEntity,
+    selected: Boolean,
+    onSelect: (Long) -> Unit,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = { onSelect(category.id) },
+        label = { Text(category.name) },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = Color(category.colorArgb).copy(alpha = 0.25f),
+        ),
     )
 }
 

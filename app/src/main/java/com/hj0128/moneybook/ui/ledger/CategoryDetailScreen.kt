@@ -300,12 +300,12 @@ private fun ChildBreakdown(state: CategoryDetailUiState) {
 /**
  * 고른 내역을 어느 카테고리로 옮길지 고른다.
  *
- * 소분류까지 전부 평평하게 낸다. 여기서 트리를 다시 그리면 다이얼로그가 길어지고,
- * 어차피 옮길 곳은 대개 소분류다.
+ * 트리를 다시 그리는 대신 "식비 > 외식" 처럼 한 줄로 낸다. 다이얼로그에서 계층을
+ * 그리면 세로로만 길어지고, 어차피 고를 수 있는 건 리프뿐이라 계층이 필요 없다.
  */
 @Composable
 private fun AssignCategoryDialog(
-    categories: List<CategoryEntity>,
+    categories: List<AssignableCategory>,
     count: Int,
     onDismiss: () -> Unit,
     onSelect: (Long) -> Unit,
@@ -322,25 +322,23 @@ private fun AssignCategoryDialog(
                         .heightIn(max = 320.dp)
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    categories.forEach { category ->
+                    categories.forEach { item ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onSelect(category.id) }
+                                .clickable { onSelect(item.category.id) }
                                 .padding(vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Box(
                                 modifier = Modifier
-                                    // 소분류는 들여써서 어디 밑인지 보이게 한다.
-                                    .padding(start = if (category.isTopLevel) 0.dp else 20.dp)
                                     .size(10.dp)
                                     .clip(CircleShape)
-                                    .background(Color(category.colorArgb)),
+                                    .background(Color(item.category.colorArgb)),
                             )
                             Spacer(Modifier.width(12.dp))
                             Text(
-                                text = category.name,
+                                text = item.label,
                                 style = MaterialTheme.typography.bodyLarge,
                             )
                         }
