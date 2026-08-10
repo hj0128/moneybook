@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -55,6 +56,9 @@ class CategoryManagerViewModel(
     private val _type = MutableStateFlow(TransactionType.EXPENSE)
     val type: StateFlow<TransactionType> = _type.asStateFlow()
 
+    /** 열어 둔 대분류. null 이면 대분류 목록을 보는 중이다. */
+    private val _openParentId = MutableStateFlow<Long?>(null)
+
     private val _editTarget = MutableStateFlow<CategoryEditTarget?>(null)
     val editTarget: StateFlow<CategoryEditTarget?> = _editTarget.asStateFlow()
 
@@ -76,8 +80,32 @@ class CategoryManagerViewModel(
             initialValue = CategoryManagerUiState(),
         )
 
+    /**
+     * 열어 둔 대분류.
+     *
+     * 목록에서 찾아 쓰므로, 그 대분류가 지워지면 자연히 null 이 되어 대분류 목록으로 돌아온다.
+     */
+    val openParent: StateFlow<CategoryNode?> =
+        combine(state, _openParentId) { uiState, id ->
+            uiState.nodes.firstOrNull { it.category.id == id }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
+        )
+
     fun selectType(type: TransactionType) {
         _type.value = type
+        // 종류가 바뀌면 카테고리 목록 자체가 달라지므로 열어 둔 대분류도 닫는다.
+        _openParentId.value = null
+    }
+
+    fun openParent(categoryId: Long) {
+        _openParentId.value = categoryId
+    }
+
+    fun closeParent() {
+        _openParentId.value = null
     }
 
     fun startAddTopLevel() {
