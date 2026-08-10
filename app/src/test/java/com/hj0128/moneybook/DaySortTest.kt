@@ -17,6 +17,7 @@ class DaySortTest {
         amount = 1_000,
         type = TransactionType.EXPENSE,
         dateEpochDay = 0,
+        merchant = "",
         memo = "",
         categoryName = null,
         categoryColor = null,

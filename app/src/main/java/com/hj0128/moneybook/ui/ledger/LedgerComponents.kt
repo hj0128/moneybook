@@ -194,13 +194,9 @@ fun TransactionRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            val subtitle = listOfNotNull(
-                item.accountName.takeIf { item.type != TransactionType.TRANSFER },
-                item.memo.takeIf { it.isNotBlank() },
-            ).joinToString(" · ")
-            if (subtitle.isNotBlank()) {
+            if (item.subtitle.isNotBlank()) {
                 Text(
-                    text = subtitle,
+                    text = item.subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

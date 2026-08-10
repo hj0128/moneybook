@@ -22,6 +22,7 @@ class CategoryDetailTest {
         amount = amount,
         type = TransactionType.EXPENSE,
         dateEpochDay = date.toEpochDay(),
+        merchant = "",
         memo = "",
         categoryName = "식비",
         categoryColor = null,

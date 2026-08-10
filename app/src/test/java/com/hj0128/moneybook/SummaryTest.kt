@@ -13,6 +13,7 @@ class SummaryTest {
         amount = amount,
         type = type,
         dateEpochDay = 20_000,
+        merchant = "",
         memo = "",
         categoryName = null,
         categoryColor = null,

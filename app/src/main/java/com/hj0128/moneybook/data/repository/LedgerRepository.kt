@@ -172,6 +172,7 @@ class LedgerRepository(
         accountId: Long,
         toAccountId: Long?,
         date: LocalDate,
+        merchant: String,
         memo: String,
         nowMillis: Long,
     ): Long {
@@ -189,6 +190,7 @@ class LedgerRepository(
                 accountId = accountId,
                 toAccountId = if (type == TransactionType.TRANSFER) toAccountId else null,
                 dateEpochDay = date.toEpochDay(),
+                merchant = merchant.trim(),
                 memo = memo.trim(),
                 createdAt = nowMillis,
             )

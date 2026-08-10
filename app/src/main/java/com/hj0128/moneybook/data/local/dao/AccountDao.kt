@@ -24,6 +24,7 @@ interface AccountDao {
         SELECT a.id AS id,
                a.name AS name,
                a.type AS type,
+               a.color_argb AS color_argb,
                a.initial_balance
                  + IFNULL((
                      SELECT SUM(CASE t.type WHEN 'INCOME' THEN t.amount ELSE -t.amount END)

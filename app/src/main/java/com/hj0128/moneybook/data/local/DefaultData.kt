@@ -34,11 +34,18 @@ internal object DefaultData {
         Seed("기타", 0xFF78909C),
     )
 
+    /** 자산 기본 색. 마이그레이션에서도 같은 값을 써야 하므로 여기 한 곳에 둔다. */
+    const val ACCOUNT_COLOR_CASH = -10044566 // 0xFF66BB6A
+    const val ACCOUNT_COLOR_BANK = -12409355 // 0xFF42A5F5
+    const val ACCOUNT_COLOR_CARD = -8497214 // 0xFF7E57C2
+
     private val accounts = listOf(
-        Triple("현금", "CASH", 0L),
-        Triple("은행 계좌", "BANK", 0L),
-        Triple("체크/신용카드", "CARD", 0L),
+        AccountSeed("현금", "CASH", ACCOUNT_COLOR_CASH),
+        AccountSeed("은행 계좌", "BANK", ACCOUNT_COLOR_BANK),
+        AccountSeed("체크/신용카드", "CARD", ACCOUNT_COLOR_CARD),
     )
+
+    private data class AccountSeed(val name: String, val type: String, val colorArgb: Int)
 
     fun seed(db: SupportSQLiteDatabase) {
         expenseCategories.forEachIndexed { index, seed ->
@@ -47,10 +54,11 @@ internal object DefaultData {
         incomeCategories.forEachIndexed { index, seed ->
             insertCategory(db, seed, "INCOME", index)
         }
-        accounts.forEachIndexed { index, (name, type, initialBalance) ->
+        accounts.forEachIndexed { index, seed ->
             db.execSQL(
-                "INSERT INTO accounts (name, type, initial_balance, sort_order) VALUES (?, ?, ?, ?)",
-                arrayOf<Any>(name, type, initialBalance, index),
+                "INSERT INTO accounts (name, type, initial_balance, sort_order, color_argb) " +
+                    "VALUES (?, ?, ?, ?, ?)",
+                arrayOf<Any>(seed.name, seed.type, 0L, index, seed.colorArgb),
             )
         }
     }

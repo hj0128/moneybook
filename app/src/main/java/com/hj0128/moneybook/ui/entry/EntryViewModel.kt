@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hj0128.moneybook.appContainer
+import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.TransactionType
@@ -25,7 +26,11 @@ data class EntryUiState(
     /** 사용자가 누른 숫자만 담는다. 포맷팅은 화면에서 한다. */
     val amountText: String = "",
     val date: LocalDate = LocalDate.now(),
+    /** 어디서 썼는지. 비워도 저장된다(현금 지출처럼 사용처가 없는 경우도 있다). */
+    val merchant: String = "",
     val memo: String = "",
+    /** 키패드는 접힌 채로 시작한다. 금액을 눌러야 올라온다. */
+    val keypadVisible: Boolean = false,
     /** 대분류 > 소분류로 묶은 카테고리. 화면은 묶음 그대로 그린다. */
     val categoryNodes: List<CategoryNode> = emptyList(),
     val selectedCategoryId: Long? = null,
@@ -38,6 +43,16 @@ data class EntryUiState(
     val amount: Long get() = amountText.toLongOrNull() ?: 0L
 
     val isTransfer: Boolean get() = type == TransactionType.TRANSFER
+
+    /** 카테고리 줄에 보여줄 값. 소분류면 "식비 › 외식". */
+    val selectedCategory: SelectedCategory? get() = categoryNodes.findSelected(selectedCategoryId)
+
+    val selectedAccountName: String? get() = accountNameOf(selectedAccountId)
+
+    val selectedToAccountName: String? get() = accountNameOf(selectedToAccountId)
+
+    private fun accountNameOf(id: Long?): String? =
+        id?.let { accounts.firstOrNull { account -> account.id == it }?.name }
 
     val canSave: Boolean
         get() = amount > 0 &&
@@ -145,8 +160,21 @@ class EntryViewModel(
         _uiState.update { it.copy(date = date) }
     }
 
+    fun updateMerchant(merchant: String) {
+        _uiState.update { it.copy(merchant = merchant, errorMessage = null) }
+    }
+
     fun updateMemo(memo: String) {
         _uiState.update { it.copy(memo = memo) }
+    }
+
+    fun showKeypad() {
+        _uiState.update { it.copy(keypadVisible = true) }
+    }
+
+    /** 금액 말고 다른 것을 만지기 시작하면 키패드는 자리를 비켜준다. */
+    fun hideKeypad() {
+        _uiState.update { it.copy(keypadVisible = false) }
     }
 
     fun save() {
@@ -164,6 +192,7 @@ class EntryViewModel(
                     accountId = requireNotNull(state.selectedAccountId),
                     toAccountId = state.selectedToAccountId,
                     date = state.date,
+                    merchant = state.merchant,
                     memo = state.memo,
                     nowMillis = System.currentTimeMillis(),
                 )
@@ -190,4 +219,23 @@ class EntryViewModel(
             initializer { EntryViewModel(appContainer().ledgerRepository) }
         }
     }
+}
+
+/** 고른 카테고리와, 소분류라면 그 대분류 이름. */
+data class SelectedCategory(
+    val category: CategoryEntity,
+    val parentName: String?,
+) {
+    val label: String get() = parentName?.let { "$it › ${category.name}" } ?: category.name
+}
+
+internal fun List<CategoryNode>.findSelected(categoryId: Long?): SelectedCategory? {
+    if (categoryId == null) return null
+    for (node in this) {
+        if (node.category.id == categoryId) return SelectedCategory(node.category, null)
+        node.children.firstOrNull { it.id == categoryId }?.let { child ->
+            return SelectedCategory(child, node.category.name)
+        }
+    }
+    return null
 }

@@ -59,6 +59,8 @@ data class TransactionEntity(
     val toAccountId: Long? = null,
     @ColumnInfo(name = "date_epoch_day")
     val dateEpochDay: Long,
+    /** 어디서 썼는지(스타벅스, 이마트 ...). 목록에서 이 건이 무엇이었는지 알아보게 하는 값. */
+    val merchant: String = "",
     val memo: String = "",
     @ColumnInfo(name = "created_at")
     val createdAt: Long,

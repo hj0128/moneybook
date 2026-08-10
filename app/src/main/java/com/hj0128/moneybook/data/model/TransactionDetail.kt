@@ -10,6 +10,7 @@ data class TransactionDetail(
     val type: TransactionType,
     @ColumnInfo(name = "date_epoch_day")
     val dateEpochDay: Long,
+    val merchant: String,
     val memo: String,
     @ColumnInfo(name = "category_name")
     val categoryName: String?,
@@ -22,12 +23,28 @@ data class TransactionDetail(
 ) {
     val date: LocalDate get() = LocalDate.ofEpochDay(dateEpochDay)
 
-    /** 화면에 보여줄 제목. 이체는 카테고리가 없으므로 계좌 흐름을 제목으로 쓴다. */
+    /**
+     * 화면에 보여줄 제목.
+     *
+     * 사용처가 있으면 그것이 제목이다. "식비 8,000원"보다 "김밥천국 8,000원"이
+     * 무슨 지출이었는지 훨씬 빨리 알아보게 한다.
+     * 사용처를 안 적었거나 v3 이전에 쌓인 내역은 예전처럼 카테고리 이름을 쓴다.
+     * 이체는 카테고리가 없으므로 계좌 흐름을 제목으로 쓴다.
+     */
     val title: String
-        get() = when (type) {
-            TransactionType.TRANSFER -> "${accountName ?: "?"} → ${toAccountName ?: "?"}"
+        get() = when {
+            type == TransactionType.TRANSFER -> "${accountName ?: "?"} → ${toAccountName ?: "?"}"
+            merchant.isNotBlank() -> merchant
             else -> categoryName ?: "미분류"
         }
+
+    /** 제목 아래 한 줄. 제목이 사용처면 카테고리를 여기서 보여준다. */
+    val subtitle: String
+        get() = listOfNotNull(
+            categoryName.takeIf { merchant.isNotBlank() && type != TransactionType.TRANSFER },
+            accountName.takeIf { type != TransactionType.TRANSFER },
+            memo.takeIf { it.isNotBlank() },
+        ).joinToString(" · ")
 }
 
 /** 월 단위 합계. */
@@ -44,5 +61,7 @@ data class AccountBalance(
     val id: Long,
     val name: String,
     val type: AccountType,
+    @ColumnInfo(name = "color_argb")
+    val colorArgb: Int,
     val balance: Long,
 )
