@@ -10,6 +10,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.hj0128.moneybook.data.model.TransactionType
+import com.hj0128.moneybook.ui.account.AccountManagerScreen
 import com.hj0128.moneybook.ui.category.CategoryManagerScreen
 import com.hj0128.moneybook.ui.entry.EntryScreen
 import com.hj0128.moneybook.ui.ledger.CategoryDetailScreen
@@ -21,6 +22,7 @@ object Routes {
     const val LEDGER = "ledger"
     const val ENTRY = "entry"
     const val CATEGORY_MANAGER = "categories"
+    const val ACCOUNT_MANAGER = "accounts"
 
     /**
      * 카테고리 상세. 보고 있던 달을 같이 넘긴다.
@@ -60,10 +62,14 @@ fun AppNavHost(
                     navController.navigate(Routes.uncategorized(type, yearMonth))
                 },
                 onManageCategories = { navController.navigate(Routes.CATEGORY_MANAGER) },
+                onManageAccounts = { navController.navigate(Routes.ACCOUNT_MANAGER) },
             )
         }
         composable(Routes.CATEGORY_MANAGER) {
             CategoryManagerScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.ACCOUNT_MANAGER) {
+            AccountManagerScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.ENTRY) {
             EntryScreen(

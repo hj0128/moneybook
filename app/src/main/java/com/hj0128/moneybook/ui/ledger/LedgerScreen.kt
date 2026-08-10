@@ -41,6 +41,7 @@ fun LedgerScreen(
     onOpenCategory: (categoryId: Long, yearMonth: YearMonth) -> Unit,
     onOpenUncategorized: (type: TransactionType, yearMonth: YearMonth) -> Unit,
     onManageCategories: () -> Unit,
+    onManageAccounts: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LedgerViewModel = viewModel(
         factory = LedgerViewModel.factory(YearMonth.now())
@@ -67,7 +68,10 @@ fun LedgerScreen(
                     )
                 },
                 actions = {
-                    OverflowMenu(onManageCategories = onManageCategories)
+                    OverflowMenu(
+                        onManageCategories = onManageCategories,
+                        onManageAccounts = onManageAccounts,
+                    )
                 },
             )
         },
@@ -121,9 +125,12 @@ fun LedgerScreen(
     }
 }
 
-/** 설정거리가 카테고리 관리 하나뿐이라 화면을 따로 두지 않고 여기에 단다. */
+/** 설정거리가 관리 화면 둘뿐이라 설정 화면을 따로 두지 않고 여기에 단다. */
 @Composable
-private fun OverflowMenu(onManageCategories: () -> Unit) {
+private fun OverflowMenu(
+    onManageCategories: () -> Unit,
+    onManageAccounts: () -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
 
     IconButton(onClick = { expanded = true }) {
@@ -138,6 +145,13 @@ private fun OverflowMenu(onManageCategories: () -> Unit) {
             onClick = {
                 expanded = false
                 onManageCategories()
+            },
+        )
+        DropdownMenuItem(
+            text = { Text("자산 관리") },
+            onClick = {
+                expanded = false
+                onManageAccounts()
             },
         )
     }

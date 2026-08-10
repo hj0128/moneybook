@@ -3,9 +3,11 @@ package com.hj0128.moneybook.data.repository
 import com.hj0128.moneybook.data.local.dao.AccountDao
 import com.hj0128.moneybook.data.local.dao.CategoryDao
 import com.hj0128.moneybook.data.local.dao.TransactionDao
+import com.hj0128.moneybook.data.local.entity.AccountEntity
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.local.entity.TransactionEntity
 import com.hj0128.moneybook.data.model.AccountBalance
+import com.hj0128.moneybook.data.model.AccountType
 import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.MonthTotal
@@ -198,6 +200,76 @@ class LedgerRepository(
     }
 
     suspend fun deleteTransaction(id: Long) = transactionDao.deleteById(id)
+
+    // ---- 자산 관리 ----
+
+    suspend fun accountUsage(accountId: Long): Int = accountDao.countUsage(accountId)
+
+    /** 이전 대상을 골랐을 때 뜻이 사라지는 이체 수. 대상이 바뀌면 다시 세야 한다. */
+    suspend fun selfTransfersAfterMove(fromId: Long, toId: Long): Int =
+        accountDao.countSelfTransfersAfterMove(fromId, toId)
+
+    suspend fun addAccount(
+        name: String,
+        type: AccountType,
+        colorArgb: Int,
+        initialBalance: Long,
+    ): Result<Long> {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("이름을 입력해 주세요."))
+        if (accountDao.countSameName(trimmed, excludeId = 0L) > 0) {
+            return Result.failure(IllegalArgumentException("같은 이름이 이미 있습니다."))
+        }
+        val id = accountDao.insert(
+            AccountEntity(
+                name = trimmed,
+                type = type,
+                colorArgb = colorArgb,
+                initialBalance = initialBalance,
+                sortOrder = accountDao.nextSortOrder(),
+            )
+        )
+        return Result.success(id)
+    }
+
+    suspend fun updateAccount(
+        id: Long,
+        name: String,
+        type: AccountType,
+        colorArgb: Int,
+        initialBalance: Long,
+    ): Result<Unit> {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("이름을 입력해 주세요."))
+        val current = accountDao.findById(id)
+            ?: return Result.failure(IllegalStateException("자산을 찾을 수 없습니다."))
+        if (accountDao.countSameName(trimmed, excludeId = id) > 0) {
+            return Result.failure(IllegalArgumentException("같은 이름이 이미 있습니다."))
+        }
+        accountDao.update(
+            current.copy(
+                name = trimmed,
+                type = type,
+                colorArgb = colorArgb,
+                initialBalance = initialBalance,
+            )
+        )
+        return Result.success(Unit)
+    }
+
+    /**
+     * 자산 삭제.
+     *
+     * [toId] 가 있으면 거래를 그쪽으로 옮긴 뒤 지운다. 쓰인 적이 없으면 옮길 것이
+     * 없으므로 null 로 부른다. 마지막 자산은 지울 수 없다(거래가 갈 곳이 없다).
+     */
+    suspend fun deleteAccount(id: Long, toId: Long?): Result<Unit> {
+        if (accountDao.count() <= 1) {
+            return Result.failure(IllegalStateException("자산이 하나뿐이라 지울 수 없습니다."))
+        }
+        if (toId == null) accountDao.deleteById(id) else accountDao.deleteWithReassign(id, toId)
+        return Result.success(Unit)
+    }
 }
 
 /** 삭제 다이얼로그가 무엇을 물어봐야 할지 정하는 근거. */
