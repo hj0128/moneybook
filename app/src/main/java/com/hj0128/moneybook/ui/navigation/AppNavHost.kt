@@ -21,6 +21,11 @@ import java.time.YearMonth
 object Routes {
     const val LEDGER = "ledger"
     const val ENTRY = "entry"
+
+    /** 기존 내역 수정. 입력 화면을 그대로 쓰고 채워둘 내역 id 만 넘긴다. */
+    const val ENTRY_EDIT = "entry/{transactionId}"
+
+    fun entryEdit(transactionId: Long): String = "entry/$transactionId"
     const val CATEGORY_MANAGER = "categories"
     const val ACCOUNT_MANAGER = "accounts"
 
@@ -63,6 +68,17 @@ fun AppNavHost(
                 },
                 onManageCategories = { navController.navigate(Routes.CATEGORY_MANAGER) },
                 onManageAccounts = { navController.navigate(Routes.ACCOUNT_MANAGER) },
+                onOpenTransaction = { navController.navigate(Routes.entryEdit(it)) },
+            )
+        }
+        composable(
+            route = Routes.ENTRY_EDIT,
+            arguments = listOf(navArgument("transactionId") { type = NavType.LongType }),
+        ) { backStackEntry ->
+            EntryScreen(
+                onClose = { navController.popBackStack() },
+                onSaved = { navController.popBackStack() },
+                editingId = backStackEntry.arguments?.getLong("transactionId"),
             )
         }
         composable(Routes.CATEGORY_MANAGER) {

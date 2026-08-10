@@ -162,10 +162,9 @@ fun TransactionRow(
                     Modifier
                 }
             )
-            .combinedClickable(
-                onClick = { if (selectionMode) onClick() },
-                onLongClick = onLongClick,
-            )
+            // 평소에는 탭이 '열어서 고치기', 선택 모드에서는 '고르기'다. 어느 쪽인지는
+            // 부르는 쪽이 onClick 에 담아 넘긴다.
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -199,6 +198,17 @@ fun TransactionRow(
                     text = item.subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // 메모는 자유 서술이라 길이를 가늠할 수 없다. 카테고리·결제수단과 한 줄에 이으면
+            // 메모가 길 때 앞의 두 값이 잘려 나가므로 아래 줄로 내린다.
+            if (item.memo.isNotBlank()) {
+                Text(
+                    text = item.memo,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

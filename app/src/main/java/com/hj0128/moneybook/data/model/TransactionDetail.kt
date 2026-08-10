@@ -38,13 +38,22 @@ data class TransactionDetail(
             else -> categoryName ?: "미분류"
         }
 
-    /** 제목 아래 한 줄. 제목이 사용처면 카테고리를 여기서 보여준다. */
+    /**
+     * 제목 아래 첫 줄: 카테고리 | 결제수단.
+     *
+     * 거래처를 안 적어 제목이 카테고리가 된 경우에도 카테고리를 그대로 다시 쓴다.
+     * 되풀이처럼 보여도 줄마다 같은 자리에 같은 값이 오는 편이 훑기 쉽다.
+     * 조건에 따라 첫 줄이 "카테고리 | 결제수단"이 되었다가 "결제수단"만 되면
+     * 두 번째 값이 무엇인지 매번 다시 읽어야 한다.
+     *
+     * 이체만 예외다. 카테고리가 없고 두 자산은 이미 제목("현금 → 은행 계좌")에 있다.
+     */
     val subtitle: String
-        get() = listOfNotNull(
-            categoryName.takeIf { merchant.isNotBlank() && type != TransactionType.TRANSFER },
-            accountName.takeIf { type != TransactionType.TRANSFER },
-            memo.takeIf { it.isNotBlank() },
-        ).joinToString(" · ")
+        get() = if (type == TransactionType.TRANSFER) {
+            ""
+        } else {
+            listOfNotNull(categoryName ?: "미분류", accountName).joinToString(" | ")
+        }
 }
 
 /** 월 단위 합계. */

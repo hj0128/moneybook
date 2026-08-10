@@ -39,7 +39,12 @@ data class EntryUiState(
     val selectedToAccountId: Long? = null,
     val errorMessage: String? = null,
     val isSaved: Boolean = false,
+    /** 기존 내역을 고치는 중이면 그 id. 새로 넣는 중이면 null. */
+    val editingId: Long? = null,
+    val isDeleted: Boolean = false,
 ) {
+    val isEditing: Boolean get() = editingId != null
+
     val amount: Long get() = amountText.toLongOrNull() ?: 0L
 
     val isTransfer: Boolean get() = type == TransactionType.TRANSFER
@@ -66,14 +71,16 @@ data class EntryUiState(
 
 class EntryViewModel(
     private val repository: LedgerRepository,
+    private val editingId: Long? = null,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(EntryUiState())
+    private val _uiState = MutableStateFlow(EntryUiState(editingId = editingId))
     val uiState: StateFlow<EntryUiState> = _uiState.asStateFlow()
 
     init {
         // 지출 카테고리를 기본으로 먼저 띄운다(가장 많이 쓰는 입력이라).
         observeCategories(TransactionType.EXPENSE)
+        if (editingId != null) loadForEdit(editingId)
         viewModelScope.launch {
             repository.observeAccounts().collect { accounts ->
                 _uiState.update { state ->
@@ -84,6 +91,32 @@ class EntryViewModel(
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * 고칠 내역을 불러와 화면을 채운다.
+     *
+     * 자산 목록을 보는 쪽에서 selectedAccountId 가 비어 있으면 첫 자산으로 채우는데,
+     * 여기서 실제 값을 덮어쓰므로 그 기본값과 부딪히지 않는다.
+     */
+    private fun loadForEdit(id: Long) {
+        viewModelScope.launch {
+            val entity = repository.findTransaction(id) ?: return@launch
+            _uiState.update { state ->
+                state.copy(
+                    type = entity.type,
+                    amountText = entity.amount.toString(),
+                    date = LocalDate.ofEpochDay(entity.dateEpochDay),
+                    merchant = entity.merchant,
+                    memo = entity.memo,
+                    selectedCategoryId = entity.categoryId,
+                    selectedAccountId = entity.accountId,
+                    selectedToAccountId = entity.toAccountId,
+                )
+            }
+            // 종류가 지출이 아니면 그 종류의 카테고리를 다시 구독해야 한다.
+            if (entity.type != TransactionType.EXPENSE) observeCategories(entity.type)
         }
     }
 
@@ -177,10 +210,40 @@ class EntryViewModel(
         _uiState.update { it.copy(keypadVisible = false) }
     }
 
+    /** 수정 중인 내역 삭제. 목록에서 길게 누르는 것과 같은 동작을 이 화면에도 둔다. */
+    fun delete() {
+        val id = _uiState.value.editingId ?: return
+        viewModelScope.launch {
+            repository.deleteTransaction(id)
+            _uiState.update { it.copy(isDeleted = true) }
+        }
+    }
+
     fun save() {
         val state = _uiState.value
         if (!state.canSave) {
             _uiState.update { it.copy(errorMessage = validationMessage(state)) }
+            return
+        }
+        val id = state.editingId
+        if (id != null) {
+            viewModelScope.launch {
+                repository.updateTransaction(
+                    id = id,
+                    amount = state.amount,
+                    type = state.type,
+                    categoryId = state.selectedCategoryId,
+                    accountId = requireNotNull(state.selectedAccountId),
+                    toAccountId = state.selectedToAccountId,
+                    date = state.date,
+                    merchant = state.merchant,
+                    memo = state.memo,
+                )
+                    .onSuccess { _uiState.update { it.copy(isSaved = true) } }
+                    .onFailure { error ->
+                        _uiState.update { it.copy(errorMessage = error.message ?: "저장에 실패했습니다.") }
+                    }
+            }
             return
         }
         viewModelScope.launch {
@@ -215,8 +278,14 @@ class EntryViewModel(
     }
 
     companion object {
-        val Factory: ViewModelProvider.Factory = viewModelFactory {
-            initializer { EntryViewModel(appContainer().ledgerRepository) }
+        /** [editingId] 가 있으면 그 내역을 고치는 화면이 된다. */
+        fun factory(editingId: Long? = null): ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                EntryViewModel(
+                    repository = appContainer().ledgerRepository,
+                    editingId = editingId,
+                )
+            }
         }
     }
 }

@@ -34,6 +34,7 @@ import com.hj0128.moneybook.data.model.DaySortOrder
 fun DailyTab(
     viewModel: LedgerViewModel,
     onRequestDelete: (Long) -> Unit,
+    onOpenTransaction: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.dailyState.collectAsStateWithLifecycle()
@@ -57,6 +58,7 @@ fun DailyTab(
                         TransactionRow(
                             item = item,
                             onLongClick = { onRequestDelete(item.id) },
+                            onClick = { onOpenTransaction(item.id) },
                         )
                     }
                 }

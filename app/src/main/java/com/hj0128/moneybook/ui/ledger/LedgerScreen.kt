@@ -42,6 +42,7 @@ fun LedgerScreen(
     onOpenUncategorized: (type: TransactionType, yearMonth: YearMonth) -> Unit,
     onManageCategories: () -> Unit,
     onManageAccounts: () -> Unit,
+    onOpenTransaction: (Long) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LedgerViewModel = viewModel(
         factory = LedgerViewModel.factory(YearMonth.now())
@@ -100,6 +101,7 @@ fun LedgerScreen(
                 LedgerTab.DAILY -> DailyTab(
                     viewModel = viewModel,
                     onRequestDelete = { pendingDeleteId = it },
+                    onOpenTransaction = onOpenTransaction,
                 )
 
                 LedgerTab.MONTHLY -> MonthlyTab(viewModel = viewModel)

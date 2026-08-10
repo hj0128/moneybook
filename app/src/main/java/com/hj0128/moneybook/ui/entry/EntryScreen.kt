@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
@@ -28,7 +29,9 @@ import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dialpad
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -60,13 +63,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -113,13 +120,20 @@ fun EntryScreen(
     onClose: () -> Unit,
     onSaved: () -> Unit,
     modifier: Modifier = Modifier,
-    viewModel: EntryViewModel = viewModel(factory = EntryViewModel.Factory),
+    editingId: Long? = null,
+    viewModel: EntryViewModel = viewModel(
+        // 고치는 내역이 바뀌면 다른 ViewModel 이어야 한다. key 를 안 주면 같은 것을 재사용해
+        // 먼저 열었던 내역이 그대로 남는다.
+        key = editingId?.let { "entry-$it" },
+        factory = EntryViewModel.factory(editingId),
+    ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val focusManager = LocalFocusManager.current
     var showDatePicker by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<EntrySheet?>(null) }
+    var confirmDelete by remember { mutableStateOf(false) }
 
     // 금액 말고 다른 것을 만지기 시작하면 숫자 키패드도 시스템 키보드도 자리를 비켜준다.
     val dismissInputs = {
@@ -127,9 +141,9 @@ fun EntryScreen(
         viewModel.hideKeypad()
     }
 
-    // 저장이 끝나면 화면을 닫는다.
-    LaunchedEffect(state.isSaved) {
-        if (state.isSaved) onSaved()
+    // 저장이나 삭제가 끝나면 화면을 닫는다.
+    LaunchedEffect(state.isSaved, state.isDeleted) {
+        if (state.isSaved || state.isDeleted) onSaved()
     }
     LaunchedEffect(state.errorMessage) {
         state.errorMessage?.let { snackbarHostState.showSnackbar(it) }
@@ -139,10 +153,18 @@ fun EntryScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("내역 추가") },
+                title = { Text(if (state.isEditing) "내역 수정" else "내역 추가") },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
                         Icon(Icons.Default.Close, contentDescription = "닫기")
+                    }
+                },
+                actions = {
+                    // 목록에서 길게 눌러 지우는 길만 있으면 찾기 어렵다. 여기에도 둔다.
+                    if (state.isEditing) {
+                        IconButton(onClick = { confirmDelete = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "이 내역 삭제")
+                        }
                     }
                 },
             )
@@ -278,6 +300,20 @@ fun EntryScreen(
                 },
             )
         }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("이 내역을 삭제할까요?") },
+            text = { Text("삭제하면 되돌릴 수 없습니다.") },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; viewModel.delete() }) { Text("삭제") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("취소") }
+            },
+        )
     }
 
     if (showDatePicker) {
@@ -481,39 +517,64 @@ private fun InputRow(
     onFocused: () -> Unit,
     divider: Boolean = true,
 ) {
+    // 줄 어디를 눌러도 커서가 들어와야 한다. 값 칸만 반응하면 라벨 쪽을 눌렀을 때
+    // 아무 일도 일어나지 않아 고장 난 것처럼 보인다.
+    val focusRequester = remember { FocusRequester() }
+
+    // 커서 위치를 직접 들고 있는다. 값만 넘기면 이미 글자가 있는 칸에 들어갔을 때
+    // 커서가 맨 앞에 놓여 새로 친 글자가 앞에 끼어든다("기술서적" -> "Kotlin기술서적").
+    var field by remember { mutableStateOf(TextFieldValue(value)) }
+    if (field.text != value) {
+        field = TextFieldValue(value, TextRange(value.length))
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClickLabel = "$label 입력") { focusRequester.requestFocus() }
             .padding(horizontal = 16.dp)
             .heightIn(min = 56.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RowLabel(label)
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            textStyle = MaterialTheme.typography.bodyLarge.copy(
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.End,
-            ),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            modifier = Modifier
-                .weight(1f)
-                .onFocusChanged { if (it.isFocused) onFocused() },
-            decorationBox = { inner ->
-                Box(contentAlignment = Alignment.CenterEnd) {
-                    if (value.isEmpty()) {
-                        Text(
-                            text = "—",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.outline,
-                        )
-                    }
-                    inner()
-                }
-            },
-        )
+        // 입력칸은 글자 폭만 차지하고, 왼쪽 빈 공간은 이 Box 가 받는다.
+        // 입력칸이 남은 폭을 다 먹으면 오른쪽 정렬된 글자 왼쪽을 누른 것이
+        // "맨 앞 글자 앞"으로 해석되어 새로 친 글자가 앞에 끼어든다.
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterEnd,
+        ) {
+            if (value.isEmpty()) {
+                Text(
+                    text = "—",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+            BasicTextField(
+                value = field,
+                onValueChange = {
+                    field = it
+                    onValueChange(it.text)
+                },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.End,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                modifier = Modifier
+                    .widthIn(min = 1.dp)
+                    .focusRequester(focusRequester)
+                    .onFocusChanged {
+                        if (it.isFocused) {
+                            onFocused()
+                            // 줄의 빈 곳을 눌러 들어온 경우다. 이어서 적는 게 보통이므로 끝에 둔다.
+                            field = field.copy(selection = TextRange(field.text.length))
+                        }
+                    },
+            )
+        }
         // 고르는 줄의 화살표만큼 자리를 비워 값 끝이 세로로 맞는다.
         Spacer(Modifier.width(20.dp))
     }

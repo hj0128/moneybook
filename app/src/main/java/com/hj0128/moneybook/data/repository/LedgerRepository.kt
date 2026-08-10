@@ -199,6 +199,52 @@ class LedgerRepository(
         )
     }
 
+    suspend fun findTransaction(id: Long): TransactionEntity? = transactionDao.findById(id)
+
+    /**
+     * 내역 수정.
+     *
+     * 종류(지출/수입/이체)까지 바꿀 수 있다. 잘못 넣은 것을 고치는 게 목적이라
+     * 종류만 못 바꾸게 하면 지우고 다시 넣어야 한다.
+     */
+    suspend fun updateTransaction(
+        id: Long,
+        amount: Long,
+        type: TransactionType,
+        categoryId: Long?,
+        accountId: Long,
+        toAccountId: Long?,
+        date: LocalDate,
+        merchant: String,
+        memo: String,
+    ): Result<Unit> {
+        if (amount <= 0) return Result.failure(IllegalArgumentException("금액은 0보다 커야 합니다."))
+        if (type == TransactionType.TRANSFER) {
+            if (toAccountId == null) {
+                return Result.failure(IllegalArgumentException("이체는 입금 자산이 필요합니다."))
+            }
+            if (toAccountId == accountId) {
+                return Result.failure(IllegalArgumentException("출금 자산과 입금 자산이 같습니다."))
+            }
+        }
+        val current = transactionDao.findById(id)
+            ?: return Result.failure(IllegalStateException("내역을 찾을 수 없습니다."))
+        transactionDao.update(
+            current.copy(
+                amount = amount,
+                type = type,
+                // 이체는 카테고리를 쓰지 않는다.
+                categoryId = if (type == TransactionType.TRANSFER) null else categoryId,
+                accountId = accountId,
+                toAccountId = if (type == TransactionType.TRANSFER) toAccountId else null,
+                dateEpochDay = date.toEpochDay(),
+                merchant = merchant.trim(),
+                memo = memo.trim(),
+            )
+        )
+        return Result.success(Unit)
+    }
+
     suspend fun deleteTransaction(id: Long) = transactionDao.deleteById(id)
 
     // ---- 자산 관리 ----
