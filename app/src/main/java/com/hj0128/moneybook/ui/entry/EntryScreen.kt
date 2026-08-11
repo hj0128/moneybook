@@ -70,6 +70,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -519,7 +520,11 @@ private fun InputRow(
 ) {
     // 줄 어디를 눌러도 커서가 들어와야 한다. 값 칸만 반응하면 라벨 쪽을 눌렀을 때
     // 아무 일도 일어나지 않아 고장 난 것처럼 보인다.
+    //
+    // requestFocus() 는 포커스만 준다. 키보드는 따로 띄워야 한다. 안 그러면
+    // 커서만 깜빡이고 키보드가 안 올라와서 더 고장 난 것처럼 보인다.
     val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
 
     // 커서 위치를 직접 들고 있는다. 값만 넘기면 이미 글자가 있는 칸에 들어갔을 때
     // 커서가 맨 앞에 놓여 새로 친 글자가 앞에 끼어든다("기술서적" -> "Kotlin기술서적").
@@ -531,7 +536,10 @@ private fun InputRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClickLabel = "$label 입력") { focusRequester.requestFocus() }
+            .clickable(onClickLabel = "$label 입력") {
+                focusRequester.requestFocus()
+                keyboard?.show()
+            }
             .padding(horizontal = 16.dp)
             .heightIn(min = 56.dp),
         verticalAlignment = Alignment.CenterVertically,
