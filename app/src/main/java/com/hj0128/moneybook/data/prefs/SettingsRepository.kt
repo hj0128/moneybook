@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.hj0128.moneybook.data.model.CategorySortOrder
 import com.hj0128.moneybook.data.model.DaySortOrder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -35,7 +36,20 @@ class SettingsRepository(context: Context) {
         }
     }
 
+    val categorySortOrder: Flow<CategorySortOrder> = dataStore.data.map { preferences ->
+        preferences[KEY_CATEGORY_SORT_ORDER]
+            ?.let { name -> runCatching { CategorySortOrder.valueOf(name) }.getOrNull() }
+            ?: CategorySortOrder.AMOUNT
+    }
+
+    suspend fun setCategorySortOrder(order: CategorySortOrder) {
+        dataStore.edit { preferences ->
+            preferences[KEY_CATEGORY_SORT_ORDER] = order.name
+        }
+    }
+
     private companion object {
         val KEY_DAY_SORT_ORDER = stringPreferencesKey("day_sort_order")
+        val KEY_CATEGORY_SORT_ORDER = stringPreferencesKey("category_sort_order")
     }
 }

@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -66,6 +67,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.TransactionType
+import com.hj0128.moneybook.ui.common.ReorderableList
 import com.hj0128.moneybook.ui.theme.CategoryPalette
 import com.hj0128.moneybook.ui.theme.paletteColorOrDefault
 import com.hj0128.moneybook.util.withSubjectJosa
@@ -73,9 +75,10 @@ import com.hj0128.moneybook.util.withSubjectJosa
 private val manageableTypes = listOf(TransactionType.EXPENSE, TransactionType.INCOME)
 
 /**
- * 카테고리 관리: 대분류 > 소분류 트리를 보고 추가/수정/삭제한다.
+ * 카테고리 관리: 대분류 > 소분류 트리를 보고 추가/수정/삭제하고, 순서를 바꾼다.
  *
- * 순서 변경은 아직 없다. sort_order 는 만들어진 순서를 따른다.
+ * 순서 변경은 별도 모드다. 보통 상태의 줄에는 수정·삭제 버튼과 소분류로 들어가는 길이 이미
+ * 붙어 있어서, 손잡이까지 늘 띄워두면 무엇을 누르는 화면인지 흐려진다.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,9 +92,11 @@ fun CategoryManagerScreen(
     val editTarget by viewModel.editTarget.collectAsStateWithLifecycle()
     val deleteTarget by viewModel.deleteTarget.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val reorderDraft by viewModel.reorderDraft.collectAsStateWithLifecycle()
 
-    // 소분류를 보는 중이면 뒤로가기는 화면을 나가는 대신 대분류 목록으로 돌아간다.
-    BackHandler(enabled = openParent != null) { viewModel.closeParent() }
+    // 뒤로가기는 한 겹씩만 벗긴다. 순서 변경 중이면 모드만 끝내고, 소분류를 보는 중이면 대분류 목록으로.
+    BackHandler(enabled = reorderDraft != null) { viewModel.stopReorder() }
+    BackHandler(enabled = reorderDraft == null && openParent != null) { viewModel.closeParent() }
 
     Scaffold(
         modifier = modifier,
@@ -99,17 +104,23 @@ fun CategoryManagerScreen(
             TopAppBar(
                 navigationIcon = {
                     IconButton(
-                        onClick = { if (openParent != null) viewModel.closeParent() else onBack() },
+                        onClick = {
+                            when {
+                                reorderDraft != null -> viewModel.stopReorder()
+                                openParent != null -> viewModel.closeParent()
+                                else -> onBack()
+                            }
+                        },
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
                     }
                 },
                 title = {
                     val parent = openParent
-                    if (parent == null) {
-                        Text("카테고리 관리")
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                    when {
+                        reorderDraft != null -> Text("순서 변경")
+                        parent == null -> Text("카테고리 관리")
+                        else -> Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
                                     .size(10.dp)
@@ -121,23 +132,35 @@ fun CategoryManagerScreen(
                         }
                     }
                 },
+                actions = {
+                    if (reorderDraft != null) {
+                        TextButton(onClick = viewModel::stopReorder) { Text("완료") }
+                    } else if (canReorder(openParent, state)) {
+                        IconButton(onClick = viewModel::startReorder) {
+                            Icon(Icons.Default.SwapVert, contentDescription = "순서 변경")
+                        }
+                    }
+                },
             )
         },
         floatingActionButton = {
             val parent = openParent
-            FloatingActionButton(
-                onClick = {
-                    if (parent == null) {
-                        viewModel.startAddTopLevel()
-                    } else {
-                        viewModel.startAddChild(parent.category)
-                    }
-                },
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = if (parent == null) "대분류 추가" else "소분류 추가",
-                )
+            // 순서를 바꾸는 중에는 추가 버튼을 감춘다. 목록이 바뀌면 끌던 자리가 어긋난다.
+            if (reorderDraft == null) {
+                FloatingActionButton(
+                    onClick = {
+                        if (parent == null) {
+                            viewModel.startAddTopLevel()
+                        } else {
+                            viewModel.startAddChild(parent.category)
+                        }
+                    },
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = if (parent == null) "대분류 추가" else "소분류 추가",
+                    )
+                }
             }
         },
     ) { innerPadding ->
@@ -147,7 +170,20 @@ fun CategoryManagerScreen(
                 .fillMaxSize(),
         ) {
             val parent = openParent
-            if (parent == null) {
+            val draft = reorderDraft
+            if (draft != null) {
+                ReorderHint()
+                ReorderableList(
+                    items = draft,
+                    keyOf = { it.id },
+                    labelOf = { it.name },
+                    onMove = viewModel::moveInDraft,
+                    onDrop = viewModel::commitOrder,
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                ) { category ->
+                    ReorderRow(category = category)
+                }
+            } else if (parent == null) {
                 // 종류는 대분류 목록에서만 고른다. 소분류를 보는 중에는 부모가 이미 정해져 있다.
                 SingleChoiceSegmentedButtonRow(
                     modifier = Modifier
@@ -318,6 +354,51 @@ private fun RowActions(name: String, onEdit: () -> Unit, onDelete: () -> Unit) {
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/** 옮길 것이 하나뿐이면 순서라는 게 없다. 눌러도 아무 일 없는 버튼은 두지 않는다. */
+private fun canReorder(openParent: CategoryNode?, state: CategoryManagerUiState): Boolean =
+    if (openParent == null) state.nodes.size >= 2 else openParent.children.size >= 2
+
+/**
+ * 순서 변경 모드의 줄.
+ *
+ * 이름과 색만 남긴다. 이 모드에서는 수정도 삭제도 안 되므로, 그 버튼들을 회색으로 남겨두면
+ * 왜 안 눌리는지 묻게 된다.
+ */
+@Composable
+private fun ReorderRow(category: CategoryEntity) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp)
+            .heightIn(min = 56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(12.dp)
+                .clip(CircleShape)
+                .background(Color(category.colorArgb)),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = category.name,
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ReorderHint() {
+    Text(
+        text = "오른쪽 손잡이를 끌어 순서를 바꾸세요.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+    )
 }
 
 @Composable

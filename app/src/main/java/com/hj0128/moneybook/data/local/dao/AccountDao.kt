@@ -97,6 +97,15 @@ interface AccountDao {
     @Query("SELECT COALESCE(MAX(sort_order) + 1, 0) FROM accounts")
     suspend fun nextSortOrder(): Int
 
+    @Query("UPDATE accounts SET sort_order = :sortOrder WHERE id = :id")
+    suspend fun updateSortOrder(id: Long, sortOrder: Int)
+
+    /** 넘겨준 순서대로 0,1,2... 를 다시 매긴다. 자세한 이유는 CategoryDao.applyOrder 참고. */
+    @Transaction
+    suspend fun applyOrder(orderedIds: List<Long>) {
+        orderedIds.forEachIndexed { index, id -> updateSortOrder(id, index) }
+    }
+
     /**
      * 이전 후 삭제.
      *

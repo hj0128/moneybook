@@ -64,6 +64,35 @@ class AccountManagerViewModel(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    /**
+     * 순서 변경 중인 목록. null 이면 보통 상태다.
+     *
+     * DB 대신 이 사본을 화면에 보여준다. 한 칸 옮길 때마다 저장하면 저장 결과가 Flow 로
+     * 되돌아오는 사이에 화면이 튄다. 손을 뗄 때 한 번만 저장한다.
+     */
+    private val _reorderDraft = MutableStateFlow<List<AccountBalance>?>(null)
+    val reorderDraft: StateFlow<List<AccountBalance>?> = _reorderDraft.asStateFlow()
+
+    fun startReorder() {
+        _reorderDraft.value = accounts.value
+    }
+
+    fun moveInDraft(from: Int, to: Int) {
+        val draft = _reorderDraft.value ?: return
+        if (from !in draft.indices || to !in draft.indices) return
+        _reorderDraft.value = draft.toMutableList().apply { add(to, removeAt(from)) }
+    }
+
+    /** 손을 뗐을 때 저장. 모드는 그대로 두어 이어서 다른 줄도 옮길 수 있다. */
+    fun commitOrder() {
+        val draft = _reorderDraft.value ?: return
+        viewModelScope.launch { repository.reorderAccounts(draft.map { it.id }) }
+    }
+
+    fun stopReorder() {
+        _reorderDraft.value = null
+    }
+
     fun startAdd() {
         _editTarget.value = AccountEditTarget.New
     }

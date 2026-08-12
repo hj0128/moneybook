@@ -1,5 +1,6 @@
 package com.hj0128.moneybook.ui.account
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -62,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.AccountType
+import com.hj0128.moneybook.ui.common.ReorderableList
 import com.hj0128.moneybook.ui.theme.CategoryPalette
 import com.hj0128.moneybook.ui.theme.paletteColorOrDefault
 import com.hj0128.moneybook.util.formatWon
@@ -69,9 +72,10 @@ import com.hj0128.moneybook.util.formatWon
 private val accountTypes = listOf(AccountType.CASH, AccountType.BANK, AccountType.CARD)
 
 /**
- * 자산 관리: 현금·계좌·카드를 추가/수정/삭제한다.
+ * 자산 관리: 현금·계좌·카드를 추가/수정/삭제하고, 순서를 바꾼다.
  *
- * 순서 변경은 아직 없다. sort_order 는 만들어진 순서를 따른다.
+ * 여기서 정한 순서가 내역을 적을 때 결제수단이 놓이는 순서다. 자주 쓰는 것을 앞에 두면
+ * 매번 찾아 누르는 손이 줄어든다.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,38 +88,78 @@ fun AccountManagerScreen(
     val editTarget by viewModel.editTarget.collectAsStateWithLifecycle()
     val deleteTarget by viewModel.deleteTarget.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val reorderDraft by viewModel.reorderDraft.collectAsStateWithLifecycle()
+
+    BackHandler(enabled = reorderDraft != null) { viewModel.stopReorder() }
 
     Scaffold(
         modifier = modifier,
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = { if (reorderDraft != null) viewModel.stopReorder() else onBack() },
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
                     }
                 },
-                title = { Text("자산 관리") },
+                title = { Text(if (reorderDraft != null) "순서 변경" else "자산 관리") },
+                actions = {
+                    if (reorderDraft != null) {
+                        TextButton(onClick = viewModel::stopReorder) { Text("완료") }
+                    } else if (accounts.size >= 2) {
+                        // 하나뿐이면 순서라는 게 없다.
+                        IconButton(onClick = viewModel::startReorder) {
+                            Icon(Icons.Default.SwapVert, contentDescription = "순서 변경")
+                        }
+                    }
+                },
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = viewModel::startAdd) {
-                Icon(Icons.Default.Add, contentDescription = "자산 추가")
+            // 순서를 바꾸는 중에는 추가 버튼을 감춘다. 목록이 바뀌면 끌던 자리가 어긋난다.
+            if (reorderDraft == null) {
+                FloatingActionButton(onClick = viewModel::startAdd) {
+                    Icon(Icons.Default.Add, contentDescription = "자산 추가")
+                }
             }
         },
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 88.dp),
-        ) {
-            items(accounts, key = { it.id }) { account ->
-                AccountRow(
-                    account = account,
-                    onEdit = { viewModel.startEdit(account) },
-                    onDelete = { viewModel.startDelete(account) },
+        val draft = reorderDraft
+        if (draft != null) {
+            Column(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+                Text(
+                    text = "오른쪽 손잡이를 끌어 순서를 바꾸세요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ReorderableList(
+                    items = draft,
+                    keyOf = { it.id },
+                    labelOf = { it.name },
+                    onMove = viewModel::moveInDraft,
+                    onDrop = viewModel::commitOrder,
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                ) { account ->
+                    ReorderRow(account = account)
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 88.dp),
+            ) {
+                items(accounts, key = { it.id }) { account ->
+                    AccountRow(
+                        account = account,
+                        onEdit = { viewModel.startEdit(account) },
+                        onDelete = { viewModel.startDelete(account) },
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
             }
         }
     }
@@ -136,6 +180,38 @@ fun AccountManagerScreen(
             onSelectTarget = viewModel::selectDeleteTarget,
             onDismiss = viewModel::dismissDelete,
             onConfirm = viewModel::confirmDelete,
+        )
+    }
+}
+
+/** 순서 변경 모드의 줄. 이 모드에서는 눌러도 수정되지 않으므로 버튼을 빼고 이름만 남긴다. */
+@Composable
+private fun ReorderRow(account: AccountBalance) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp)
+            .heightIn(min = 56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(12.dp)
+                .clip(CircleShape)
+                .background(Color(account.colorArgb)),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = account.name,
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = account.type.label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

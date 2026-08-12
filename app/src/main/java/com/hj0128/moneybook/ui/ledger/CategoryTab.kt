@@ -17,10 +17,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -28,14 +32,22 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hj0128.moneybook.data.model.CategorySortOrder
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.UncategorizedTotal
@@ -57,6 +69,13 @@ fun CategoryTab(
 ) {
     val state by viewModel.categoryState.collectAsStateWithLifecycle()
     val ledgerColors = LocalLedgerColors.current
+    val listState = rememberLazyListState()
+
+    // 줄 순서가 통째로 바뀌면 보고 있던 자리는 의미가 없어진다. 그대로 두면 정렬을 바꾼 직후
+    // 목록 한가운데를 보게 되고, 1위가 화면 위로 밀려 올라가 안 보인다.
+    LaunchedEffect(state.sortOrder, state.type, state.yearMonth) {
+        listState.scrollToItem(0)
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         SingleChoiceSegmentedButtonRow(
@@ -97,12 +116,23 @@ fun CategoryTab(
                 },
             )
         }
-        Spacer(Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            SortSelector(
+                selected = state.sortOrder,
+                onSelect = viewModel::selectCategorySortOrder,
+            )
+        }
 
         if (state.isEmpty) {
             EmptyPlaceholder("이 달에는 ${state.type.label} 내역이 없습니다.")
         } else {
-            LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+            LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 88.dp)) {
                 items(state.totals, key = { it.categoryId }) { item ->
                     CategoryRow(
                         item = item,
@@ -120,6 +150,55 @@ fun CategoryTab(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 정렬 기준 선택.
+ *
+ * 일별 탭은 방향이 둘뿐이라 눌러 뒤집는 버튼이지만, 여기는 셋이라 눌러 돌리면
+ * 원하는 것을 지나칠 수 있다. 무엇을 고를 수 있는지 펼쳐 보여준다.
+ */
+@Composable
+private fun SortSelector(
+    selected: CategorySortOrder,
+    onSelect: (CategorySortOrder) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    // 메뉴는 누른 버튼 자리에서 펼쳐져야 한다. Box 로 묶어야 그 위치를 기준으로 잡는다.
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            modifier = Modifier.semantics {
+                contentDescription = "정렬 ${selected.label}. 눌러서 변경"
+            },
+        ) {
+            Icon(
+                imageVector = Icons.Default.SwapVert,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(text = selected.label, style = MaterialTheme.typography.labelLarge)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            CategorySortOrder.entries.forEach { order ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = order.label,
+                            fontWeight = if (order == selected) FontWeight.SemiBold
+                            else FontWeight.Normal,
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelect(order)
+                    },
+                )
             }
         }
     }

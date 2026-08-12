@@ -31,4 +31,7 @@ data class CategoryTotal(
     val total: Long,
     @ColumnInfo(name = "entry_count")
     val entryCount: Int,
+    /** 카테고리 관리 화면에서의 자리. 금액과 무관하게 늘 같은 순서를 보고 싶을 때 쓴다. */
+    @ColumnInfo(name = "sort_order")
+    val sortOrder: Int = 0,
 )

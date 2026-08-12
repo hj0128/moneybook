@@ -144,6 +144,15 @@ class LedgerRepository(
         return Result.success(id)
     }
 
+    /**
+     * 카테고리 순서 저장. [orderedIds] 는 한 목록(같은 부모 밑) 전체가 화면에 보이는 순서다.
+     *
+     * 목록 하나만 다시 매기므로 다른 대분류의 소분류 순서는 건드리지 않는다.
+     */
+    suspend fun reorderCategories(orderedIds: List<Long>) {
+        categoryDao.applyOrder(orderedIds)
+    }
+
     /** 이름과 색만 고친다. 부모와 종류는 바꾸지 않는다(바꾸면 과거 집계가 통째로 달라진다). */
     suspend fun renameCategory(id: Long, name: String, colorArgb: Int): Result<Unit> {
         val trimmed = name.trim()
@@ -276,6 +285,11 @@ class LedgerRepository(
             )
         )
         return Result.success(id)
+    }
+
+    /** 자산 순서 저장. 카테고리와 달리 목록이 하나뿐이라 전체를 다시 매긴다. */
+    suspend fun reorderAccounts(orderedIds: List<Long>) {
+        accountDao.applyOrder(orderedIds)
     }
 
     suspend fun updateAccount(

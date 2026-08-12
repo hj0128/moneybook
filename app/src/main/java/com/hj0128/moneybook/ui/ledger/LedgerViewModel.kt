@@ -6,8 +6,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hj0128.moneybook.appContainer
+import com.hj0128.moneybook.data.model.CategorySortOrder
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.DaySortOrder
+import com.hj0128.moneybook.data.model.sortedBy
 import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.MonthlySummary
 import com.hj0128.moneybook.data.model.TransactionDetail
@@ -75,6 +77,7 @@ data class CategoryUiState(
     val totals: List<CategoryTotal> = emptyList(),
     /** 카테고리가 빠진 거래. 0건이면 화면에 내지 않는다. */
     val uncategorized: UncategorizedTotal = UncategorizedTotal(entryCount = 0, total = 0L),
+    val sortOrder: CategorySortOrder = CategorySortOrder.AMOUNT,
 ) {
     /**
      * 미분류까지 더한 진짜 합계.
@@ -148,8 +151,11 @@ class LedgerViewModel(
                 combine(
                     repository.observeCategoryTotals(month, type),
                     repository.observeUncategorizedTotal(month, type),
-                ) { totals, uncategorized ->
-                    CategoryUiState(month, type, totals, uncategorized)
+                    settingsRepository.categorySortOrder,
+                ) { totals, uncategorized, sortOrder ->
+                    // 미분류는 카테고리가 아니라 정리해야 할 것이므로 정렬에 끼지 않고
+                    // 화면에서 늘 맨 아래에 붙는다.
+                    CategoryUiState(month, type, totals.sortedBy(sortOrder), uncategorized, sortOrder)
                 }
             }.stateIn(
                 scope = viewModelScope,
@@ -169,6 +175,10 @@ class LedgerViewModel(
     fun toggleDaySortOrder() {
         val next = dailyState.value.sortOrder.toggled()
         viewModelScope.launch { settingsRepository.setDaySortOrder(next) }
+    }
+
+    fun selectCategorySortOrder(order: CategorySortOrder) {
+        viewModelScope.launch { settingsRepository.setCategorySortOrder(order) }
     }
 
     /** 상단 화살표. 월별 탭에서는 한 해씩, 나머지 탭에서는 한 달씩 움직인다. */

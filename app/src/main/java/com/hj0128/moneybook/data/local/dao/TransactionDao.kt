@@ -73,7 +73,8 @@ interface TransactionDao {
                COALESCE(p.name, c.name) AS name,
                COALESCE(p.color_argb, c.color_argb) AS color_argb,
                SUM(t.amount) AS total,
-               COUNT(t.id) AS entry_count
+               COUNT(t.id) AS entry_count,
+               COALESCE(p.sort_order, c.sort_order) AS sort_order
         FROM transactions AS t
         INNER JOIN categories AS c ON c.id = t.category_id
         LEFT JOIN categories AS p ON p.id = c.parent_id
@@ -81,7 +82,8 @@ interface TransactionDao {
           AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
         GROUP BY COALESCE(p.id, c.id),
                  COALESCE(p.name, c.name),
-                 COALESCE(p.color_argb, c.color_argb)
+                 COALESCE(p.color_argb, c.color_argb),
+                 COALESCE(p.sort_order, c.sort_order)
         ORDER BY total DESC
         """
     )
@@ -103,12 +105,13 @@ interface TransactionDao {
                c.name AS name,
                c.color_argb AS color_argb,
                SUM(t.amount) AS total,
-               COUNT(t.id) AS entry_count
+               COUNT(t.id) AS entry_count,
+               c.sort_order AS sort_order
         FROM transactions AS t
         INNER JOIN categories AS c ON c.id = t.category_id
         WHERE (t.category_id = :categoryId OR c.parent_id = :categoryId)
           AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
-        GROUP BY c.id, c.name, c.color_argb
+        GROUP BY c.id, c.name, c.color_argb, c.sort_order
         ORDER BY total DESC
         """
     )

@@ -94,18 +94,52 @@ class CategoryManagerViewModel(
             initialValue = null,
         )
 
+    /**
+     * 순서 변경 중인 목록. null 이면 보통 상태다.
+     *
+     * DB 대신 이 사본을 화면에 보여준다. 한 칸 옮길 때마다 저장하면 저장 결과가 Flow 로
+     * 되돌아오는 사이에 화면이 튄다. 손을 뗄 때 한 번만 저장한다.
+     */
+    private val _reorderDraft = MutableStateFlow<List<CategoryEntity>?>(null)
+    val reorderDraft: StateFlow<List<CategoryEntity>?> = _reorderDraft.asStateFlow()
+
     fun selectType(type: TransactionType) {
         _type.value = type
         // 종류가 바뀌면 카테고리 목록 자체가 달라지므로 열어 둔 대분류도 닫는다.
         _openParentId.value = null
+        stopReorder()
     }
 
     fun openParent(categoryId: Long) {
         _openParentId.value = categoryId
+        stopReorder()
     }
 
     fun closeParent() {
         _openParentId.value = null
+        stopReorder()
+    }
+
+    /** 지금 보고 있는 목록(대분류 목록이거나 열어 둔 대분류의 소분류)의 순서를 바꾸기 시작한다. */
+    fun startReorder() {
+        val parent = openParent.value
+        _reorderDraft.value = parent?.children ?: state.value.nodes.map { it.category }
+    }
+
+    fun moveInDraft(from: Int, to: Int) {
+        val draft = _reorderDraft.value ?: return
+        if (from !in draft.indices || to !in draft.indices) return
+        _reorderDraft.value = draft.toMutableList().apply { add(to, removeAt(from)) }
+    }
+
+    /** 손을 뗐을 때 저장. 모드는 그대로 두어 이어서 다른 줄도 옮길 수 있다. */
+    fun commitOrder() {
+        val draft = _reorderDraft.value ?: return
+        viewModelScope.launch { repository.reorderCategories(draft.map { it.id }) }
+    }
+
+    fun stopReorder() {
+        _reorderDraft.value = null
     }
 
     fun startAddTopLevel() {

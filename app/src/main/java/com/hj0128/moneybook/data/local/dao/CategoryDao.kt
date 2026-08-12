@@ -85,6 +85,21 @@ interface CategoryDao {
     )
     suspend fun nextSortOrder(type: TransactionType, parentId: Long?): Int
 
+    @Query("UPDATE categories SET sort_order = :sortOrder WHERE id = :id")
+    suspend fun updateSortOrder(id: Long, sortOrder: Int)
+
+    /**
+     * 넘겨준 순서대로 0,1,2... 를 다시 매긴다.
+     *
+     * 옮긴 것만 고치지 않고 목록 전체를 다시 매기는 이유: 기존 값은 중간이 비거나(삭제)
+     * 겹칠 수 있어서, 두 줄 사이에 끼워 넣을 정수가 없는 경우가 생긴다. 한 번에 다시 매기면
+     * 그런 상태가 남지 않는다. 한 화면에 보이는 만큼이라 개수도 적다.
+     */
+    @Transaction
+    suspend fun applyOrder(orderedIds: List<Long>) {
+        orderedIds.forEachIndexed { index, id -> updateSortOrder(id, index) }
+    }
+
     @Insert
     suspend fun insert(category: CategoryEntity): Long
 
