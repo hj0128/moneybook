@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hj0128.moneybook.data.model.CategorySortOrder
 import com.hj0128.moneybook.data.model.CategoryTotal
+import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.UncategorizedTotal
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
@@ -73,7 +75,7 @@ fun CategoryTab(
 
     // 줄 순서가 통째로 바뀌면 보고 있던 자리는 의미가 없어진다. 그대로 두면 정렬을 바꾼 직후
     // 목록 한가운데를 보게 되고, 1위가 화면 위로 밀려 올라가 안 보인다.
-    LaunchedEffect(state.sortOrder, state.type, state.yearMonth) {
+    LaunchedEffect(state.sortOrder, state.type, state.period) {
         listState.scrollToItem(0)
     }
 
@@ -120,9 +122,14 @@ fun CategoryTab(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.End,
+                .padding(start = 16.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            UnitSelector(
+                selected = state.period.unit,
+                onSelect = viewModel::selectCategoryUnit,
+            )
+            Spacer(Modifier.weight(1f))
             SortSelector(
                 selected = state.sortOrder,
                 onSelect = viewModel::selectCategorySortOrder,
@@ -130,7 +137,7 @@ fun CategoryTab(
         }
 
         if (state.isEmpty) {
-            EmptyPlaceholder("이 달에는 ${state.type.label} 내역이 없습니다.")
+            EmptyPlaceholder("${state.period.thisLabel}에는 ${state.type.label} 내역이 없습니다.")
         } else {
             LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 88.dp)) {
                 items(state.totals, key = { it.categoryId }) { item ->
@@ -151,6 +158,27 @@ fun CategoryTab(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 한 달씩 볼지 한 해를 통째로 볼지. 일별 탭의 전체/수입/지출 칩과 같은 자리, 같은 모양이다.
+ *
+ * 년을 고르면 상단 제목과 화살표도 한 해 단위로 바뀐다.
+ */
+@Composable
+private fun UnitSelector(
+    selected: PeriodUnit,
+    onSelect: (PeriodUnit) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        PeriodUnit.entries.forEach { unit ->
+            FilterChip(
+                selected = unit == selected,
+                onClick = { onSelect(unit) },
+                label = { Text(unit.label) },
+            )
         }
     }
 }

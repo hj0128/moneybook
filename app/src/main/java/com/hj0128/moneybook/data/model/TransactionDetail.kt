@@ -12,6 +12,9 @@ data class TransactionDetail(
     val dateEpochDay: Long,
     val merchant: String,
     val memo: String,
+    /** 소분류별 추이처럼 이름이 아니라 카테고리 자체로 걸러야 할 때 쓴다. 이름은 부모가 다르면 겹칠 수 있다. */
+    @ColumnInfo(name = "category_id")
+    val categoryId: Long?,
     @ColumnInfo(name = "category_name")
     val categoryName: String?,
     @ColumnInfo(name = "category_color")

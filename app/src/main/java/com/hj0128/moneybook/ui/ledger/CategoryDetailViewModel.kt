@@ -8,8 +8,11 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hj0128.moneybook.appContainer
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.CategoryTotal
+import com.hj0128.moneybook.data.model.LedgerPeriod
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.repository.LedgerRepository
+import java.time.LocalDate
+import java.time.YearMonth
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,7 +25,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.YearMonth
 
 /** 재분류 후보 한 줄. [parentName] 은 소분류일 때만 채워진다. */
 data class AssignableCategory(
@@ -41,7 +43,9 @@ sealed interface DetailSource {
 }
 
 data class CategoryDetailUiState(
-    val yearMonth: YearMonth,
+    val period: LedgerPeriod,
+    /** 평균의 분모와 추이의 "아직 안 온 달"을 가르는 기준. 테스트에서 날짜를 고정할 수 있게 밖에서 받는다. */
+    val today: LocalDate = LocalDate.now(),
     val categoryName: String = "",
     val categoryColor: Int? = null,
     val type: TransactionType = TransactionType.EXPENSE,
@@ -65,19 +69,74 @@ data class CategoryDetailUiState(
     val total: Long get() = groups.sumOf { group -> group.items.sumOf { it.amount } }
 
     /**
-     * 하루 평균. 거래가 있었던 날이 아니라 그 달의 전체 일수로 나눈다.
+     * 평균. 한 달을 보면 하루 평균, 한 해를 보면 월 평균이다.
      *
-     * "쓴 날만" 기준으로 하면 이틀에 10만원씩 두 번 쓴 달이 하루 평균 10만원으로 나와
-     * 실제 한 달 씀씀이보다 과장돼 보인다. 달력 기준이어야 다른 달과 비교가 된다.
+     * 거래가 있었던 날(달)이 아니라 달력 전체로 나눈다. "쓴 날만" 기준으로 하면 이틀에
+     * 10만원씩 두 번 쓴 달이 하루 평균 10만원으로 나와 실제 씀씀이보다 과장돼 보인다.
+     * 달력 기준이어야 다른 기간과 비교가 된다.
+     *
+     * 한 해에 하루 평균을 쓰지 않는 이유: 365로 나눈 몇천 원은 감이 안 온다.
+     * 한 해를 볼 때 궁금한 건 "한 달에 얼마꼴"이다.
+     *
+     * 올해는 이번 달까지의 달 수로 나눈다. 아직 오지 않은 11·12월까지 12로 나누면
+     * 실제 씀씀이보다 낮게 나온다. 이번 달은 합계에 이미 들어 있으니 분모에도 넣는다.
      */
-    val dailyAverage: Long get() = total / yearMonth.lengthOfMonth()
+    val averageLabel: String
+        get() = when (period) {
+            is LedgerPeriod.Month -> "하루 평균"
+            is LedgerPeriod.Year -> "월 평균"
+        }
+
+    val average: Long
+        get() = when (period) {
+            is LedgerPeriod.Month -> total / elapsedDays(period.yearMonth)
+            is LedgerPeriod.Year -> total / elapsedMonths(period.year)
+        }
+
+    /** 이번 달은 오늘까지의 일수. 월 평균과 같은 이유로 아직 오지 않은 날은 분모에서 뺀다. */
+    private fun elapsedDays(month: YearMonth): Int = when {
+        month == YearMonth.from(today) -> today.dayOfMonth
+        else -> month.lengthOfMonth()
+    }
+
+    private fun elapsedMonths(year: Int): Int = when {
+        year < today.year -> 12
+        year == today.year -> today.monthValue
+        // 미래 연도는 합계가 0 이라 무엇으로 나눠도 0 이다. 0 으로 나누지만 않으면 된다.
+        else -> 12
+    }
+
+    /** 년 단위일 때만 추이를 보여준다. 한 달짜리에 막대 하나는 위 합계와 같은 숫자다. */
+    val showsTrend: Boolean get() = period is LedgerPeriod.Year && !isEmpty
+
+    /**
+     * 1월부터 12월까지의 달별 합계. 항상 12칸이다. [childId] 를 주면 그 소분류만.
+     *
+     * 쿼리를 따로 두지 않고 이미 불러온 그 해 내역을 달별로 묶는다. 같은 데이터에서 나오니
+     * 위 합계와 막대의 합이 어긋날 일이 없다.
+     */
+    fun monthlyTrend(childId: Long? = null): List<Long> {
+        val byMonth = groups
+            .flatMap { it.items }
+            // childId 가 있으면 그 소분류(또는 대분류에 직접 붙은 건)만 센다.
+            .filter { childId == null || it.categoryId == childId }
+            .groupBy { it.date.monthValue }
+            .mapValues { (_, items) -> items.sumOf { it.amount } }
+        return (1..12).map { byMonth[it] ?: 0L }
+    }
+
+    /** 아직 오지 않은 달. 0원과 구분해서 흐리게 그린다. "안 썼다"와 "아직 모른다"는 다르다. */
+    fun isFutureMonth(month: Int): Boolean {
+        val year = (period as? LedgerPeriod.Year)?.year ?: return false
+        return year > today.year || (year == today.year && month > today.monthValue)
+    }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class CategoryDetailViewModel(
     private val repository: LedgerRepository,
     val source: DetailSource,
-    yearMonth: YearMonth,
+    period: LedgerPeriod,
 ) : ViewModel() {
 
     /**
@@ -94,12 +153,12 @@ class CategoryDetailViewModel(
 
     val state: StateFlow<CategoryDetailUiState> = when (source) {
         is DetailSource.Category -> combine(
-            repository.observeCategoryTransactions(yearMonth, source.id),
+            repository.observeCategoryTransactions(period, source.id),
             repository.observeCategory(source.id),
-            repository.observeChildTotals(yearMonth, source.id),
+            repository.observeChildTotals(period, source.id),
         ) { items, category, childTotals ->
             CategoryDetailUiState(
-                yearMonth = yearMonth,
+                period = period,
                 // 카테고리가 지워지면 이름을 못 읽는다. 화면이 비지 않게 기본값을 둔다.
                 categoryName = category?.name ?: "삭제된 카테고리",
                 categoryColor = category?.colorArgb,
@@ -109,10 +168,10 @@ class CategoryDetailViewModel(
             )
         }
 
-        is DetailSource.Uncategorized -> repository.observeUncategorized(yearMonth, source.type)
+        is DetailSource.Uncategorized -> repository.observeUncategorized(period, source.type)
             .map { items ->
                 CategoryDetailUiState(
-                    yearMonth = yearMonth,
+                    period = period,
                     categoryName = "미분류",
                     categoryColor = null,
                     type = source.type,
@@ -122,7 +181,7 @@ class CategoryDetailViewModel(
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = CategoryDetailUiState(yearMonth),
+        initialValue = CategoryDetailUiState(period),
     )
 
     /**
@@ -185,13 +244,13 @@ class CategoryDetailViewModel(
     }
 
     companion object {
-        fun factory(source: DetailSource, yearMonth: YearMonth): ViewModelProvider.Factory =
+        fun factory(source: DetailSource, period: LedgerPeriod): ViewModelProvider.Factory =
             viewModelFactory {
                 initializer {
                     CategoryDetailViewModel(
                         repository = appContainer().ledgerRepository,
                         source = source,
-                        yearMonth = yearMonth,
+                        period = period,
                     )
                 }
             }

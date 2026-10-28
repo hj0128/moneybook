@@ -9,6 +9,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.hj0128.moneybook.data.model.LedgerPeriod
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.account.AccountManagerScreen
 import com.hj0128.moneybook.ui.category.CategoryManagerScreen
@@ -30,21 +31,32 @@ object Routes {
     const val ACCOUNT_MANAGER = "accounts"
 
     /**
-     * 카테고리 상세. 보고 있던 달을 같이 넘긴다.
+     * 카테고리 상세. 보고 있던 기간을 같이 넘긴다.
      *
-     * YearMonth 를 통째로 넘기는 대신 연/월 정수로 쪼갠 이유는, 프로세스가 죽었다 살아나도
+     * 기간을 통째로 넘기는 대신 연/월 정수로 쪼갠 이유는, 프로세스가 죽었다 살아나도
      * 문자열 파싱 없이 그대로 복원되고 딥링크로도 읽기 쉬운 형태이기 때문이다.
+     * month 가 0 이면 그 해 전체다. 실제 달은 1~12 라 겹치지 않는다.
      */
     const val CATEGORY_DETAIL = "category/{categoryId}/{year}/{month}"
 
-    fun categoryDetail(categoryId: Long, yearMonth: YearMonth): String =
-        "category/$categoryId/${yearMonth.year}/${yearMonth.monthValue}"
+    fun categoryDetail(categoryId: Long, period: LedgerPeriod): String =
+        "category/$categoryId/${period.toPathSegments()}"
 
     /** 미분류는 카테고리 id 가 없으니 수입/지출로 좁힌다. */
     const val UNCATEGORIZED = "uncategorized/{type}/{year}/{month}"
 
-    fun uncategorized(type: TransactionType, yearMonth: YearMonth): String =
-        "uncategorized/${type.name}/${yearMonth.year}/${yearMonth.monthValue}"
+    fun uncategorized(type: TransactionType, period: LedgerPeriod): String =
+        "uncategorized/${type.name}/${period.toPathSegments()}"
+
+    private const val WHOLE_YEAR = 0
+
+    private fun LedgerPeriod.toPathSegments(): String = when (this) {
+        is LedgerPeriod.Month -> "${yearMonth.year}/${yearMonth.monthValue}"
+        is LedgerPeriod.Year -> "$year/$WHOLE_YEAR"
+    }
+
+    fun periodFrom(year: Int, month: Int): LedgerPeriod =
+        if (month == WHOLE_YEAR) LedgerPeriod.Year(year) else LedgerPeriod.Month(YearMonth.of(year, month))
 }
 
 @Composable
@@ -60,11 +72,11 @@ fun AppNavHost(
         composable(Routes.LEDGER) {
             LedgerScreen(
                 onAddTransaction = { navController.navigate(Routes.ENTRY) },
-                onOpenCategory = { categoryId, yearMonth ->
-                    navController.navigate(Routes.categoryDetail(categoryId, yearMonth))
+                onOpenCategory = { categoryId, period ->
+                    navController.navigate(Routes.categoryDetail(categoryId, period))
                 },
-                onOpenUncategorized = { type, yearMonth ->
-                    navController.navigate(Routes.uncategorized(type, yearMonth))
+                onOpenUncategorized = { type, period ->
+                    navController.navigate(Routes.uncategorized(type, period))
                 },
                 onManageCategories = { navController.navigate(Routes.CATEGORY_MANAGER) },
                 onManageAccounts = { navController.navigate(Routes.ACCOUNT_MANAGER) },
@@ -105,7 +117,7 @@ fun AppNavHost(
             val args = backStackEntry.arguments
             CategoryDetailScreen(
                 source = DetailSource.Category(args?.getLong("categoryId") ?: 0L),
-                yearMonth = args.toYearMonth(),
+                period = args.toPeriod(),
                 onBack = { navController.popBackStack() },
             )
         }
@@ -123,14 +135,14 @@ fun AppNavHost(
             }.getOrDefault(TransactionType.EXPENSE)
             CategoryDetailScreen(
                 source = DetailSource.Uncategorized(transactionType),
-                yearMonth = args.toYearMonth(),
+                period = args.toPeriod(),
                 onBack = { navController.popBackStack() },
             )
         }
     }
 }
 
-private fun Bundle?.toYearMonth(): YearMonth = YearMonth.of(
-    this?.getInt("year") ?: YearMonth.now().year,
-    this?.getInt("month") ?: YearMonth.now().monthValue,
+private fun Bundle?.toPeriod(): LedgerPeriod = Routes.periodFrom(
+    year = this?.getInt("year") ?: YearMonth.now().year,
+    month = this?.getInt("month") ?: YearMonth.now().monthValue,
 )

@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,13 +44,52 @@ fun DailyTab(
     Column(modifier = modifier.fillMaxSize()) {
         SummaryCard(summary = state.summary)
 
-        if (state.isEmpty) {
+        if (!state.hasAnyInMonth) {
             EmptyPlaceholder("이 달의 내역이 없습니다.\n오른쪽 아래 + 버튼으로 추가해 보세요.")
         } else {
+            // return@Column 으로 일찍 빠져나가면 안 된다. 첫 화면(빈 상태)에서 빠져나간 뒤
+            // 데이터가 들어와 다시 그릴 때 아래 줄이 제대로 구성되지 않는다.
+            FilteredList(
+                state = state,
+                onSelectFilter = viewModel::selectDailyFilter,
+                onToggleSort = viewModel::toggleDaySortOrder,
+                onRequestDelete = onRequestDelete,
+                onOpenTransaction = onOpenTransaction,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FilteredList(
+    state: DailyUiState,
+    onSelectFilter: (DailyFilter) -> Unit,
+    onToggleSort: () -> Unit,
+    onRequestDelete: (Long) -> Unit,
+    onOpenTransaction: (Long) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilterSelector(
+                selected = state.filter,
+                onSelect = onSelectFilter,
+            )
+            Spacer(Modifier.weight(1f))
             SortToggle(
                 sortOrder = state.sortOrder,
-                onToggle = viewModel::toggleDaySortOrder,
+                onToggle = onToggleSort,
             )
+        }
+
+        if (state.isEmpty) {
+            // 필터를 풀면 내역이 있다는 걸 알려야 한다. 그냥 "없음"이면 데이터가 날아간 줄 안다.
+            EmptyPlaceholder("이 달에는 ${state.filter.label} 내역이 없습니다.")
+        } else {
             LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
                 state.groups.forEach { group ->
                     item(key = "header-${group.date}") {
@@ -63,6 +104,33 @@ fun DailyTab(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 전체/수입/지출 중 하나만 고른다.
+ *
+ * 분할 버튼은 남는 폭을 나눠 갖는 방식이라 정렬 버튼과 한 줄에 두면 폭을 못 받아 찌그러진다.
+ * 칩은 글자만큼만 차지해서 옆에 무엇이 와도 모양이 그대로다.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FilterSelector(
+    selected: DailyFilter,
+    onSelect: (DailyFilter) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        DailyFilter.entries.forEach { filter ->
+            FilterChip(
+                selected = filter == selected,
+                onClick = { onSelect(filter) },
+                label = { Text(filter.label) },
+            )
         }
     }
 }

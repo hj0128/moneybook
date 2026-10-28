@@ -9,6 +9,8 @@ import com.hj0128.moneybook.appContainer
 import com.hj0128.moneybook.data.model.CategorySortOrder
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.DaySortOrder
+import com.hj0128.moneybook.data.model.LedgerPeriod
+import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.model.sortedBy
 import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.MonthlySummary
@@ -39,12 +41,34 @@ enum class LedgerTab(val label: String) {
     CATEGORY("카테고리별"),
 }
 
+/**
+ * 일별 탭에서 어떤 거래만 볼지.
+ *
+ * 이체는 수입도 지출도 아니라 '전체'에서만 보인다. 이체만 따로 볼 일은 드물어서
+ * 칸을 하나 더 늘리지 않았다.
+ */
+enum class DailyFilter(val label: String) {
+    ALL("전체"),
+    INCOME("수입"),
+    EXPENSE("지출");
+
+    fun matches(type: TransactionType): Boolean = when (this) {
+        ALL -> true
+        INCOME -> type == TransactionType.INCOME
+        EXPENSE -> type == TransactionType.EXPENSE
+    }
+}
+
 data class DailyUiState(
     val yearMonth: YearMonth,
+    /** 필터와 무관한 그 달 전체 합계. 위 카드는 늘 같은 숫자를 보여줘야 기준점이 된다. */
     val summary: MonthlySummary = MonthlySummary(),
-    /** 날짜별로 묶은 목록. 화면에서 다시 계산하지 않도록 여기서 만들어 둔다. */
+    /** 필터를 거친 뒤 날짜별로 묶은 목록. 화면에서 다시 계산하지 않도록 여기서 만들어 둔다. */
     val groups: List<DayGroup> = emptyList(),
     val sortOrder: DaySortOrder = DaySortOrder.NEWEST_FIRST,
+    val filter: DailyFilter = DailyFilter.ALL,
+    /** 필터 전 기준으로 그 달에 거래가 하나라도 있는지. "내역 없음"과 "걸러져서 없음"을 구분한다. */
+    val hasAnyInMonth: Boolean = false,
 ) {
     val isEmpty: Boolean get() = groups.isEmpty()
 }
@@ -72,7 +96,7 @@ data class MonthlyUiState(
 }
 
 data class CategoryUiState(
-    val yearMonth: YearMonth,
+    val period: LedgerPeriod,
     val type: TransactionType = TransactionType.EXPENSE,
     val totals: List<CategoryTotal> = emptyList(),
     /** 카테고리가 빠진 거래. 0건이면 화면에 내지 않는다. */
@@ -112,20 +136,41 @@ class LedgerViewModel(
     private val _yearMonth = MutableStateFlow(initialMonth)
     val yearMonth: StateFlow<YearMonth> = _yearMonth.asStateFlow()
 
+    /** 앱을 다시 켜면 전체로 돌아온다. 걸러진 채로 열리면 내역이 사라진 줄 안다. */
+    private val _dailyFilter = MutableStateFlow(DailyFilter.ALL)
+
     private val _categoryType = MutableStateFlow(TransactionType.EXPENSE)
     val categoryType: StateFlow<TransactionType> = _categoryType.asStateFlow()
+
+    /**
+     * 카테고리별 탭의 집계 단위. 기간 자체는 [_yearMonth] 하나에서 나온다.
+     * 년으로 봤다가 월로 돌아오면 보던 달이 그대로 남아 있어야 해서 단위만 따로 둔다.
+     */
+    private val _categoryUnit = MutableStateFlow(PeriodUnit.MONTH)
+    val categoryUnit: StateFlow<PeriodUnit> = _categoryUnit.asStateFlow()
+
+    private val categoryPeriod = combine(_categoryUnit, _yearMonth) { unit, month ->
+        LedgerPeriod.of(unit, month)
+    }.distinctUntilChanged()
 
     private val monthTransactions = _yearMonth.flatMapLatest { month ->
         repository.observeMonth(month).map { items -> month to items }
     }
 
     val dailyState: StateFlow<DailyUiState> =
-        combine(monthTransactions, settingsRepository.daySortOrder) { (month, items), sortOrder ->
+        combine(
+            monthTransactions,
+            settingsRepository.daySortOrder,
+            _dailyFilter,
+        ) { (month, items), sortOrder, filter ->
             DailyUiState(
                 yearMonth = month,
                 summary = items.toSummary(),
-                groups = items.toDayGroups().applySort(sortOrder),
+                // 하루 머리글의 합계도 걸러진 것만으로 다시 계산되도록 묶기 전에 거른다.
+                groups = items.filter { filter.matches(it.type) }.toDayGroups().applySort(sortOrder),
                 sortOrder = sortOrder,
+                filter = filter,
+                hasAnyInMonth = items.isNotEmpty(),
             )
         }.stateIn(
             scope = viewModelScope,
@@ -146,25 +191,29 @@ class LedgerViewModel(
             )
 
     val categoryState: StateFlow<CategoryUiState> =
-        combine(_yearMonth, _categoryType) { month, type -> month to type }
-            .flatMapLatest { (month, type) ->
+        combine(categoryPeriod, _categoryType) { period, type -> period to type }
+            .flatMapLatest { (period, type) ->
                 combine(
-                    repository.observeCategoryTotals(month, type),
-                    repository.observeUncategorizedTotal(month, type),
+                    repository.observeCategoryTotals(period, type),
+                    repository.observeUncategorizedTotal(period, type),
                     settingsRepository.categorySortOrder,
                 ) { totals, uncategorized, sortOrder ->
                     // 미분류는 카테고리가 아니라 정리해야 할 것이므로 정렬에 끼지 않고
                     // 화면에서 늘 맨 아래에 붙는다.
-                    CategoryUiState(month, type, totals.sortedBy(sortOrder), uncategorized, sortOrder)
+                    CategoryUiState(period, type, totals.sortedBy(sortOrder), uncategorized, sortOrder)
                 }
             }.stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
-                initialValue = CategoryUiState(initialMonth),
+                initialValue = CategoryUiState(LedgerPeriod.Month(initialMonth)),
             )
 
     fun selectTab(tab: LedgerTab) {
         _tab.value = tab
+    }
+
+    fun selectDailyFilter(filter: DailyFilter) {
+        _dailyFilter.value = filter
     }
 
     fun selectCategoryType(type: TransactionType) {
@@ -181,17 +230,31 @@ class LedgerViewModel(
         viewModelScope.launch { settingsRepository.setCategorySortOrder(order) }
     }
 
-    /** 상단 화살표. 월별 탭에서는 한 해씩, 나머지 탭에서는 한 달씩 움직인다. */
+    fun selectCategoryUnit(unit: PeriodUnit) {
+        _categoryUnit.value = unit
+    }
+
+    /**
+     * 지금 탭이 한 해 단위로 보는지. 상단 제목과 화살표 보폭이 이 값을 따른다.
+     * 월별 탭은 늘 한 해, 카테고리별 탭은 고른 단위에 따라 다르다.
+     */
+    fun isYearView(tab: LedgerTab, categoryUnit: PeriodUnit): Boolean = when (tab) {
+        LedgerTab.MONTHLY -> true
+        LedgerTab.CATEGORY -> categoryUnit == PeriodUnit.YEAR
+        LedgerTab.DAILY -> false
+    }
+
+    /** 상단 화살표. 한 해 단위로 보는 중이면 한 해씩, 아니면 한 달씩 움직인다. */
     fun showPrevious() {
-        _yearMonth.value = when (_tab.value) {
-            LedgerTab.MONTHLY -> _yearMonth.value.minusYears(1)
+        _yearMonth.value = when {
+            isYearView(_tab.value, _categoryUnit.value) -> _yearMonth.value.minusYears(1)
             else -> _yearMonth.value.minusMonths(1)
         }
     }
 
     fun showNext() {
-        _yearMonth.value = when (_tab.value) {
-            LedgerTab.MONTHLY -> _yearMonth.value.plusYears(1)
+        _yearMonth.value = when {
+            isYearView(_tab.value, _categoryUnit.value) -> _yearMonth.value.plusYears(1)
             else -> _yearMonth.value.plusMonths(1)
         }
     }

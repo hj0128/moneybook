@@ -10,6 +10,7 @@ import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.AccountType
 import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.CategoryTotal
+import com.hj0128.moneybook.data.model.LedgerPeriod
 import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.toNodes
 import com.hj0128.moneybook.data.model.MonthlySummary
@@ -44,52 +45,39 @@ class LedgerRepository(
         return transactionDao.observeMonthlyTotals(start, end)
     }
 
-    fun observeCategoryTotals(
-        yearMonth: YearMonth,
-        type: TransactionType,
-    ): Flow<List<CategoryTotal>> {
-        val start = yearMonth.atDay(1).toEpochDay()
-        val end = yearMonth.atEndOfMonth().toEpochDay()
-        return transactionDao.observeCategoryTotals(type, start, end)
-    }
+    // 카테고리 집계는 월/년 어느 쪽이든 같은 쿼리를 쓴다. 기간 계산은 LedgerPeriod 가 맡는다.
 
-    /** 카테고리 상세: 한 카테고리의 그 달 내역. */
+    fun observeCategoryTotals(
+        period: LedgerPeriod,
+        type: TransactionType,
+    ): Flow<List<CategoryTotal>> =
+        transactionDao.observeCategoryTotals(type, period.start.toEpochDay(), period.end.toEpochDay())
+
+    /** 카테고리 상세: 한 카테고리의 그 기간 내역. */
     fun observeCategoryTransactions(
-        yearMonth: YearMonth,
+        period: LedgerPeriod,
         categoryId: Long,
-    ): Flow<List<TransactionDetail>> {
-        val start = yearMonth.atDay(1).toEpochDay()
-        val end = yearMonth.atEndOfMonth().toEpochDay()
-        return transactionDao.observeByCategory(categoryId, start, end)
-    }
+    ): Flow<List<TransactionDetail>> =
+        transactionDao.observeByCategory(categoryId, period.start.toEpochDay(), period.end.toEpochDay())
 
     /** 카테고리 상세의 소분류별 소계. 소분류가 없으면 한 줄만 나온다. */
     fun observeChildTotals(
-        yearMonth: YearMonth,
+        period: LedgerPeriod,
         categoryId: Long,
-    ): Flow<List<CategoryTotal>> {
-        val start = yearMonth.atDay(1).toEpochDay()
-        val end = yearMonth.atEndOfMonth().toEpochDay()
-        return transactionDao.observeChildTotals(categoryId, start, end)
-    }
+    ): Flow<List<CategoryTotal>> =
+        transactionDao.observeChildTotals(categoryId, period.start.toEpochDay(), period.end.toEpochDay())
 
     fun observeUncategorizedTotal(
-        yearMonth: YearMonth,
+        period: LedgerPeriod,
         type: TransactionType,
-    ): Flow<UncategorizedTotal> {
-        val start = yearMonth.atDay(1).toEpochDay()
-        val end = yearMonth.atEndOfMonth().toEpochDay()
-        return transactionDao.observeUncategorizedTotal(type, start, end)
-    }
+    ): Flow<UncategorizedTotal> =
+        transactionDao.observeUncategorizedTotal(type, period.start.toEpochDay(), period.end.toEpochDay())
 
     fun observeUncategorized(
-        yearMonth: YearMonth,
+        period: LedgerPeriod,
         type: TransactionType,
-    ): Flow<List<TransactionDetail>> {
-        val start = yearMonth.atDay(1).toEpochDay()
-        val end = yearMonth.atEndOfMonth().toEpochDay()
-        return transactionDao.observeUncategorized(type, start, end)
-    }
+    ): Flow<List<TransactionDetail>> =
+        transactionDao.observeUncategorized(type, period.start.toEpochDay(), period.end.toEpochDay())
 
     /** 고른 내역을 한 카테고리로 옮긴다. */
     suspend fun assignCategory(transactionIds: List<Long>, categoryId: Long) {

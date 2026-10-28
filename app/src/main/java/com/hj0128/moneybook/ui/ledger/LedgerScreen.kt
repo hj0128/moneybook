@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hj0128.moneybook.data.model.LedgerPeriod
 import com.hj0128.moneybook.data.model.TransactionType
 import java.time.YearMonth
 
@@ -38,8 +39,8 @@ import java.time.YearMonth
 @Composable
 fun LedgerScreen(
     onAddTransaction: () -> Unit,
-    onOpenCategory: (categoryId: Long, yearMonth: YearMonth) -> Unit,
-    onOpenUncategorized: (type: TransactionType, yearMonth: YearMonth) -> Unit,
+    onOpenCategory: (categoryId: Long, period: LedgerPeriod) -> Unit,
+    onOpenUncategorized: (type: TransactionType, period: LedgerPeriod) -> Unit,
     onManageCategories: () -> Unit,
     onManageAccounts: () -> Unit,
     onOpenTransaction: (Long) -> Unit,
@@ -51,6 +52,7 @@ fun LedgerScreen(
     val tab by viewModel.tab.collectAsStateWithLifecycle()
     val yearMonth by viewModel.yearMonth.collectAsStateWithLifecycle()
     val categoryType by viewModel.categoryType.collectAsStateWithLifecycle()
+    val categoryUnit by viewModel.categoryUnit.collectAsStateWithLifecycle()
     var pendingDeleteId by remember { mutableStateOf<Long?>(null) }
 
     Scaffold(
@@ -59,10 +61,11 @@ fun LedgerScreen(
             TopAppBar(
                 title = {
                     PeriodSelector(
-                        // 월별 탭은 한 해를 통째로 보여주므로 제목도 연도만 쓴다.
-                        label = when (tab) {
-                            LedgerTab.MONTHLY -> "${yearMonth.year}년"
-                            else -> "${yearMonth.year}년 ${yearMonth.monthValue}월"
+                        // 한 해를 통째로 보는 중이면 제목도 연도만 쓴다. 화살표 보폭과 같은 기준이다.
+                        label = if (viewModel.isYearView(tab, categoryUnit)) {
+                            "${yearMonth.year}년"
+                        } else {
+                            "${yearMonth.year}년 ${yearMonth.monthValue}월"
                         },
                         onPrevious = viewModel::showPrevious,
                         onNext = viewModel::showNext,
@@ -108,9 +111,13 @@ fun LedgerScreen(
 
                 LedgerTab.CATEGORY -> CategoryTab(
                     viewModel = viewModel,
-                    // 상단에서 고른 달을 그대로 넘긴다. 상세는 그 달에 고정된다.
-                    onOpenCategory = { categoryId -> onOpenCategory(categoryId, yearMonth) },
-                    onOpenUncategorized = { onOpenUncategorized(categoryType, yearMonth) },
+                    // 지금 보고 있는 기간(한 달 또는 한 해)을 그대로 넘긴다. 상세는 그 기간에 고정된다.
+                    onOpenCategory = { categoryId ->
+                        onOpenCategory(categoryId, LedgerPeriod.of(categoryUnit, yearMonth))
+                    },
+                    onOpenUncategorized = {
+                        onOpenUncategorized(categoryType, LedgerPeriod.of(categoryUnit, yearMonth))
+                    },
                 )
             }
         }
