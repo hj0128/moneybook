@@ -48,6 +48,12 @@ object Routes {
     fun uncategorized(type: TransactionType, period: LedgerPeriod): String =
         "uncategorized/${type.name}/${period.toPathSegments()}"
 
+    /** 결제수단 상세. 자산은 수입·지출이 다 오가므로 어느 쪽을 볼지도 넘긴다. */
+    const val ACCOUNT_DETAIL = "account/{accountId}/{type}/{year}/{month}"
+
+    fun accountDetail(accountId: Long, type: TransactionType, period: LedgerPeriod): String =
+        "account/$accountId/${type.name}/${period.toPathSegments()}"
+
     private const val WHOLE_YEAR = 0
 
     private fun LedgerPeriod.toPathSegments(): String = when (this) {
@@ -77,6 +83,9 @@ fun AppNavHost(
                 },
                 onOpenUncategorized = { type, period ->
                     navController.navigate(Routes.uncategorized(type, period))
+                },
+                onOpenAccount = { accountId, type, period ->
+                    navController.navigate(Routes.accountDetail(accountId, type, period))
                 },
                 onManageCategories = { navController.navigate(Routes.CATEGORY_MANAGER) },
                 onManageAccounts = { navController.navigate(Routes.ACCOUNT_MANAGER) },
@@ -122,6 +131,25 @@ fun AppNavHost(
             )
         }
         composable(
+            route = Routes.ACCOUNT_DETAIL,
+            arguments = listOf(
+                navArgument("accountId") { type = NavType.LongType },
+                navArgument("type") { type = NavType.StringType },
+                navArgument("year") { type = NavType.IntType },
+                navArgument("month") { type = NavType.IntType },
+            ),
+        ) { backStackEntry ->
+            val args = backStackEntry.arguments
+            CategoryDetailScreen(
+                source = DetailSource.Account(
+                    id = args?.getLong("accountId") ?: 0L,
+                    type = args.toTransactionType(),
+                ),
+                period = args.toPeriod(),
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(
             route = Routes.UNCATEGORIZED,
             arguments = listOf(
                 navArgument("type") { type = NavType.StringType },
@@ -130,17 +158,18 @@ fun AppNavHost(
             ),
         ) { backStackEntry ->
             val args = backStackEntry.arguments
-            val transactionType = runCatching {
-                TransactionType.valueOf(args?.getString("type").orEmpty())
-            }.getOrDefault(TransactionType.EXPENSE)
             CategoryDetailScreen(
-                source = DetailSource.Uncategorized(transactionType),
+                source = DetailSource.Uncategorized(args.toTransactionType()),
                 period = args.toPeriod(),
                 onBack = { navController.popBackStack() },
             )
         }
     }
 }
+
+private fun Bundle?.toTransactionType(): TransactionType = runCatching {
+    TransactionType.valueOf(this?.getString("type").orEmpty())
+}.getOrDefault(TransactionType.EXPENSE)
 
 private fun Bundle?.toPeriod(): LedgerPeriod = Routes.periodFrom(
     year = this?.getInt("year") ?: YearMonth.now().year,

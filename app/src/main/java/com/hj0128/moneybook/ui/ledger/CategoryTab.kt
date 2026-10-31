@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.CategorySortOrder
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.PeriodUnit
@@ -60,13 +61,19 @@ import kotlin.math.roundToInt
 
 private val breakdownTypes = listOf(TransactionType.EXPENSE, TransactionType.INCOME)
 
-/** 카테고리별 탭: 선택한 달의 지출(또는 수입)이 어디로 갔는지 비중 순으로 보여준다. */
+private val breakdownBases = BreakdownBasis.entries
+
+/**
+ * 카테고리별 탭: 선택한 기간의 지출(또는 수입)이 어디로 갔는지 비중 순으로 보여준다.
+ * 기준을 결제수단으로 바꾸면 같은 화면에서 어떤 수단으로 얼마 썼는지를 본다.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryTab(
     viewModel: LedgerViewModel,
     onOpenCategory: (categoryId: Long) -> Unit,
     onOpenUncategorized: () -> Unit,
+    onOpenAccount: (accountId: Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.categoryState.collectAsStateWithLifecycle()
@@ -75,15 +82,32 @@ fun CategoryTab(
 
     // 줄 순서가 통째로 바뀌면 보고 있던 자리는 의미가 없어진다. 그대로 두면 정렬을 바꾼 직후
     // 목록 한가운데를 보게 되고, 1위가 화면 위로 밀려 올라가 안 보인다.
-    LaunchedEffect(state.sortOrder, state.type, state.period) {
+    LaunchedEffect(state.sortOrder, state.type, state.period, state.basis) {
         listState.scrollToItem(0)
     }
 
     Column(modifier = modifier.fillMaxSize()) {
+        // 무엇으로 묶을지가 가장 큰 갈래라 맨 위에 둔다. 그 아래가 수입/지출, 그 아래가 기간이다.
         SingleChoiceSegmentedButtonRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+        ) {
+            breakdownBases.forEachIndexed { index, basis ->
+                SegmentedButton(
+                    selected = basis == state.basis,
+                    onClick = { viewModel.selectCategoryBasis(basis) },
+                    shape = SegmentedButtonDefaults.itemShape(index, breakdownBases.size),
+                ) {
+                    Text(basis.label)
+                }
+            }
+        }
+
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
         ) {
             breakdownTypes.forEachIndexed { index, type ->
                 SegmentedButton(
@@ -140,11 +164,17 @@ fun CategoryTab(
             EmptyPlaceholder("${state.period.thisLabel}에는 ${state.type.label} 내역이 없습니다.")
         } else {
             LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 88.dp)) {
-                items(state.totals, key = { it.categoryId }) { item ->
+                items(state.totals, key = { "${state.basis}-${it.categoryId}" }) { item ->
                     CategoryRow(
                         item = item,
                         ratio = state.ratioOf(item),
-                        onClick = { onOpenCategory(item.categoryId) },
+                        limit = state.limitOf(item),
+                        onClick = {
+                            when (state.basis) {
+                                BreakdownBasis.CATEGORY -> onOpenCategory(item.categoryId)
+                                BreakdownBasis.ACCOUNT -> onOpenAccount(item.categoryId)
+                            }
+                        },
                     )
                 }
                 // 미분류는 항상 맨 아래. 정리해야 할 것이지 카테고리가 아니다.
@@ -310,8 +340,38 @@ private fun UncategorizedRow(
     }
 }
 
+/**
+ * 한도 자산 줄 아래의 한 줄. "올해 남은 380,000원 / 1,000,000원".
+ *
+ * 오른쪽 금액은 다른 줄처럼 고른 기간에 쓴 돈이고, 이 줄은 기간과 상관없이 늘 지금
+ * 주기(올해/이번 달) 기준이다. 지난 달을 보고 있어도 "지금 얼마 남았나"가 궁금하기 때문이다.
+ * 그래서 "올해"를 앞에 붙여 둔다.
+ */
 @Composable
-private fun CategoryRow(item: CategoryTotal, ratio: Float, onClick: () -> Unit) {
+private fun LimitNote(account: AccountBalance) {
+    val limit = account.limitAmount ?: return
+    val over = account.limitRemaining < 0
+    val text = if (over) {
+        "${account.limitPeriodLabel} ${(-account.limitRemaining).formatWon()} 초과 / ${limit.formatWon()}"
+    } else {
+        "${account.limitPeriodLabel} 남은 ${account.limitRemaining.formatWon()} / ${limit.formatWon()}"
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        // 넘겼을 때만 지출 색. 평소에는 보조 글씨라 눈에 띄지 않아야 한다.
+        color = if (over) LocalLedgerColors.current.expense else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 20.dp, top = 2.dp),
+    )
+}
+
+@Composable
+private fun CategoryRow(
+    item: CategoryTotal,
+    ratio: Float,
+    onClick: () -> Unit,
+    limit: AccountBalance? = null,
+) {
     val color = Color(item.colorArgb)
     Column(
         modifier = Modifier
@@ -357,6 +417,7 @@ private fun CategoryRow(item: CategoryTotal, ratio: Float, onClick: () -> Unit) 
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        limit?.let { LimitNote(it) }
         Spacer(Modifier.height(6.dp))
         // 비중 막대는 카테고리 색을 그대로 쓴다. 목록의 색 점과 같은 색이라 눈으로 잇기 쉽다.
         Box(

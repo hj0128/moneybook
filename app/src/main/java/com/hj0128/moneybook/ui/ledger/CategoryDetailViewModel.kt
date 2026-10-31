@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hj0128.moneybook.appContainer
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
+import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.LedgerPeriod
 import com.hj0128.moneybook.data.model.TransactionType
@@ -34,12 +35,15 @@ data class AssignableCategory(
     val label: String get() = parentName?.let { "$it > ${category.name}" } ?: category.name
 }
 
-/** 이 화면이 무엇을 보고 있는지. 카테고리 하나이거나, 카테고리가 빠진 것들이거나. */
+/** 이 화면이 무엇을 보고 있는지. 카테고리 하나, 카테고리가 빠진 것들, 또는 결제수단 하나. */
 sealed interface DetailSource {
     data class Category(val id: Long) : DetailSource
 
     /** 미분류. 카테고리가 없으니 수입/지출로 좁힌다. */
     data class Uncategorized(val type: TransactionType) : DetailSource
+
+    /** 결제수단. 자산은 수입도 지출도 오가므로 어느 쪽을 볼지 함께 받는다. */
+    data class Account(val id: Long, val type: TransactionType) : DetailSource
 }
 
 data class CategoryDetailUiState(
@@ -50,8 +54,21 @@ data class CategoryDetailUiState(
     val categoryColor: Int? = null,
     val type: TransactionType = TransactionType.EXPENSE,
     val groups: List<DayGroup> = emptyList(),
-    /** 소분류별 소계. 대분류에 직접 붙은 거래도 한 줄로 들어 있다. */
+    /**
+     * 아래 단계 소계. 카테고리면 소분류별(대분류에 직접 붙은 거래도 한 줄),
+     * 결제수단이면 카테고리별이다.
+     */
     val childTotals: List<CategoryTotal> = emptyList(),
+    val breakdownLabel: String = "소분류",
+    /**
+     * 소계 줄을 눌러 추이를 그 줄로 좁힐 수 있는지.
+     *
+     * 결제수단의 카테고리 소계는 소분류를 대분류로 합친 줄이라, 내역의 category_id(소분류일 수 있음)
+     * 와 바로 맞대 볼 수 없다. 맞지 않는 막대를 보여주느니 고를 수 없게 둔다.
+     */
+    val breakdownFiltersTrend: Boolean = true,
+    /** 결제수단 상세일 때 그 자산. 한도 막대를 그리는 데 쓴다. */
+    val account: AccountBalance? = null,
 ) {
     val isEmpty: Boolean get() = groups.isEmpty()
 
@@ -165,6 +182,24 @@ class CategoryDetailViewModel(
                 type = category?.type ?: TransactionType.EXPENSE,
                 groups = items.toDayGroups(),
                 childTotals = childTotals,
+            )
+        }
+
+        is DetailSource.Account -> combine(
+            repository.observeAccountTransactions(period, source.id, source.type),
+            repository.observeAccount(source.id),
+            repository.observeAccountCategoryTotals(period, source.id, source.type),
+        ) { items, account, categoryTotals ->
+            CategoryDetailUiState(
+                period = period,
+                categoryName = account?.name ?: "삭제된 자산",
+                categoryColor = account?.colorArgb,
+                type = source.type,
+                groups = items.toDayGroups(),
+                childTotals = categoryTotals,
+                breakdownLabel = "카테고리",
+                breakdownFiltersTrend = false,
+                account = account,
             )
         }
 

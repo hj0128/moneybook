@@ -19,6 +19,9 @@ interface AccountDao {
     /**
      * 잔액은 따로 저장하지 않고 항상 거래에서 계산한다.
      * 잔액 컬럼을 두면 거래 수정/삭제 때마다 동기화가 어긋나 결국 틀린 숫자가 남는다.
+     *
+     * 한도 사용액도 같은 이유로 여기서 계산한다. 주기가 자산마다 달라서(매월/매년)
+     * 이번 달과 올해 범위를 둘 다 받아 자산별로 골라 쓴다.
      */
     @Query(
         """
@@ -26,6 +29,18 @@ interface AccountDao {
                a.name AS name,
                a.type AS type,
                a.color_argb AS color_argb,
+               a.initial_balance AS initial_balance,
+               a.limit_amount AS limit_amount,
+               a.limit_period AS limit_period,
+               CASE WHEN a.limit_amount IS NULL THEN 0 ELSE IFNULL((
+                   SELECT SUM(t.amount)
+                   FROM transactions AS t
+                   WHERE t.account_id = a.id
+                     AND t.type = 'EXPENSE'
+                     AND t.date_epoch_day BETWEEN
+                         (CASE a.limit_period WHEN 'YEAR' THEN :yearStart ELSE :monthStart END)
+                         AND (CASE a.limit_period WHEN 'YEAR' THEN :yearEnd ELSE :monthEnd END)
+               ), 0) END AS limit_used,
                a.initial_balance
                  + IFNULL((
                      SELECT SUM(CASE t.type WHEN 'INCOME' THEN t.amount ELSE -t.amount END)
@@ -39,7 +54,12 @@ interface AccountDao {
         ORDER BY a.sort_order ASC, a.id ASC
         """
     )
-    fun observeBalances(): Flow<List<AccountBalance>>
+    fun observeBalances(
+        monthStart: Long,
+        monthEnd: Long,
+        yearStart: Long,
+        yearEnd: Long,
+    ): Flow<List<AccountBalance>>
 
     @Query("SELECT * FROM accounts WHERE id = :id")
     suspend fun findById(id: Long): AccountEntity?

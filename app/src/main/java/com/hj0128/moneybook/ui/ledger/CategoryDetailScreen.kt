@@ -59,6 +59,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.TransactionType
+import com.hj0128.moneybook.ui.common.LimitGauge
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatWon
 import com.hj0128.moneybook.data.model.LedgerPeriod
@@ -164,6 +165,16 @@ fun CategoryDetailScreen(
                 LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
                     item(key = "summary") {
                         CategoryDetailHeader(state)
+                    }
+                    // 한도는 보고 있는 기간과 상관없이 늘 지금 주기(올해/이번 달) 기준이다.
+                    // 막대에 "올해"가 함께 적혀 있어 지난 해를 보는 중이어도 헷갈리지 않는다.
+                    state.account?.takeIf { it.hasLimit }?.let { account ->
+                        item(key = "limit") {
+                            LimitGauge(
+                                account = account,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
                     }
                     if (state.showsTrend) {
                         item(key = "trend") {
@@ -378,14 +389,14 @@ private fun ChildBreakdown(
     onSelect: (Long) -> Unit,
 ) {
     // 추이가 있을 때만 고를 수 있다. 한 달짜리 화면에서 눌러도 바뀌는 게 없으면 고장처럼 보인다.
-    val selectable = state.showsTrend
+    val selectable = state.showsTrend && state.breakdownFiltersTrend
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
         Text(
-            text = if (selectable) "소분류 · 눌러서 추이 보기" else "소분류",
+            text = if (selectable) "${state.breakdownLabel} · 눌러서 추이 보기" else state.breakdownLabel,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 8.dp),

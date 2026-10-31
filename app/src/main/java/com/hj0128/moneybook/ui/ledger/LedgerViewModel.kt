@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hj0128.moneybook.appContainer
+import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.CategorySortOrder
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.DaySortOrder
@@ -95,9 +96,23 @@ data class MonthlyUiState(
         get() = months.maxOfOrNull { maxOf(it.income, it.expense) } ?: 0L
 }
 
+/**
+ * 카테고리별 탭에서 무엇으로 묶을지.
+ *
+ * 탭을 하나 더 만들지 않고 기준만 바꾼다. 기간(월/년)과 수입/지출 선택, 정렬, 비중 막대가
+ * 결제수단에서도 똑같이 필요해서 화면을 둘로 나누면 같은 것을 두 번 만들게 된다.
+ */
+enum class BreakdownBasis(val label: String) {
+    CATEGORY("카테고리"),
+    ACCOUNT("결제수단"),
+}
+
 data class CategoryUiState(
     val period: LedgerPeriod,
     val type: TransactionType = TransactionType.EXPENSE,
+    val basis: BreakdownBasis = BreakdownBasis.CATEGORY,
+    /** 한도가 걸린 결제수단. 결제수단 기준으로 지출을 볼 때 그 줄 아래에 남은 금액을 적는다. */
+    val limitAccounts: List<AccountBalance> = emptyList(),
     val totals: List<CategoryTotal> = emptyList(),
     /** 카테고리가 빠진 거래. 0건이면 화면에 내지 않는다. */
     val uncategorized: UncategorizedTotal = UncategorizedTotal(entryCount = 0, total = 0L),
@@ -112,6 +127,14 @@ data class CategoryUiState(
     val sum: Long get() = totals.sumOf { it.total } + uncategorized.total
 
     val isEmpty: Boolean get() = totals.isEmpty() && uncategorized.isEmpty
+
+    /** 그 줄의 한도 자산. 한도는 쓴 돈의 이야기라 수입을 볼 때는 없다고 답한다. */
+    fun limitOf(item: CategoryTotal): AccountBalance? =
+        if (basis == BreakdownBasis.ACCOUNT && type == TransactionType.EXPENSE) {
+            limitAccounts.firstOrNull { it.id == item.categoryId }
+        } else {
+            null
+        }
 
     fun ratioOf(item: CategoryTotal): Float = ratioOf(item.total)
 
@@ -148,6 +171,8 @@ class LedgerViewModel(
      */
     private val _categoryUnit = MutableStateFlow(PeriodUnit.MONTH)
     val categoryUnit: StateFlow<PeriodUnit> = _categoryUnit.asStateFlow()
+
+    private val _categoryBasis = MutableStateFlow(BreakdownBasis.CATEGORY)
 
     private val categoryPeriod = combine(_categoryUnit, _yearMonth) { unit, month ->
         LedgerPeriod.of(unit, month)
@@ -191,16 +216,43 @@ class LedgerViewModel(
             )
 
     val categoryState: StateFlow<CategoryUiState> =
-        combine(categoryPeriod, _categoryType) { period, type -> period to type }
-            .flatMapLatest { (period, type) ->
-                combine(
-                    repository.observeCategoryTotals(period, type),
-                    repository.observeUncategorizedTotal(period, type),
-                    settingsRepository.categorySortOrder,
-                ) { totals, uncategorized, sortOrder ->
-                    // 미분류는 카테고리가 아니라 정리해야 할 것이므로 정렬에 끼지 않고
-                    // 화면에서 늘 맨 아래에 붙는다.
-                    CategoryUiState(period, type, totals.sortedBy(sortOrder), uncategorized, sortOrder)
+        combine(categoryPeriod, _categoryType, _categoryBasis) { period, type, basis ->
+            Triple(period, type, basis)
+        }
+            .flatMapLatest { (period, type, basis) ->
+                when (basis) {
+                    BreakdownBasis.CATEGORY -> combine(
+                        repository.observeCategoryTotals(period, type),
+                        repository.observeUncategorizedTotal(period, type),
+                        settingsRepository.categorySortOrder,
+                    ) { totals, uncategorized, sortOrder ->
+                        // 미분류는 카테고리가 아니라 정리해야 할 것이므로 정렬에 끼지 않고
+                        // 화면에서 늘 맨 아래에 붙는다.
+                        CategoryUiState(
+                            period = period,
+                            type = type,
+                            basis = basis,
+                            totals = totals.sortedBy(sortOrder),
+                            uncategorized = uncategorized,
+                            sortOrder = sortOrder,
+                        )
+                    }
+
+                    // 거래에는 자산이 반드시 붙어 있어서(account_id NOT NULL) 미분류 줄이 없다.
+                    BreakdownBasis.ACCOUNT -> combine(
+                        repository.observeAccountTotals(period, type),
+                        repository.observeAccounts(),
+                        settingsRepository.categorySortOrder,
+                    ) { totals, accounts, sortOrder ->
+                        CategoryUiState(
+                            period = period,
+                            type = type,
+                            basis = basis,
+                            limitAccounts = accounts.filter { it.hasLimit },
+                            totals = totals.sortedBy(sortOrder),
+                            sortOrder = sortOrder,
+                        )
+                    }
                 }
             }.stateIn(
                 scope = viewModelScope,
@@ -228,6 +280,10 @@ class LedgerViewModel(
 
     fun selectCategorySortOrder(order: CategorySortOrder) {
         viewModelScope.launch { settingsRepository.setCategorySortOrder(order) }
+    }
+
+    fun selectCategoryBasis(basis: BreakdownBasis) {
+        _categoryBasis.value = basis
     }
 
     fun selectCategoryUnit(unit: PeriodUnit) {

@@ -41,6 +41,7 @@ fun LedgerScreen(
     onAddTransaction: () -> Unit,
     onOpenCategory: (categoryId: Long, period: LedgerPeriod) -> Unit,
     onOpenUncategorized: (type: TransactionType, period: LedgerPeriod) -> Unit,
+    onOpenAccount: (accountId: Long, type: TransactionType, period: LedgerPeriod) -> Unit,
     onManageCategories: () -> Unit,
     onManageAccounts: () -> Unit,
     onOpenTransaction: (Long) -> Unit,
@@ -117,6 +118,9 @@ fun LedgerScreen(
                     },
                     onOpenUncategorized = {
                         onOpenUncategorized(categoryType, LedgerPeriod.of(categoryUnit, yearMonth))
+                    },
+                    onOpenAccount = { accountId ->
+                        onOpenAccount(accountId, categoryType, LedgerPeriod.of(categoryUnit, yearMonth))
                     },
                 )
             }

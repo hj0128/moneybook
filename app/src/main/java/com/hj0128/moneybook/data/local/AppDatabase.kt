@@ -20,7 +20,7 @@ import com.hj0128.moneybook.data.local.entity.TransactionEntity
         CategoryEntity::class,
         AccountEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -43,7 +43,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 // 외래키 제약을 실제로 켜준다(Room 은 기본으로 켜지 않는다).
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -109,5 +109,17 @@ internal val MIGRATION_3_4 = object : Migration(3, 4) {
         db.execSQL(
             "UPDATE accounts SET color_argb = ${DefaultData.ACCOUNT_COLOR_CARD} WHERE type = 'CARD'"
         )
+    }
+}
+
+/**
+ * v5: 결제수단에 사용 한도를 둔다(복지포인트 연 100만원 같은 것).
+ *
+ * 둘 다 null 을 허용하는 컬럼이라 기존 자산은 한도 없음으로 남는다. 데이터를 손댈 필요가 없다.
+ */
+internal val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE accounts ADD COLUMN limit_amount INTEGER")
+        db.execSQL("ALTER TABLE accounts ADD COLUMN limit_period TEXT")
     }
 }

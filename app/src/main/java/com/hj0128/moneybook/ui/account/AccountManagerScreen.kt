@@ -64,6 +64,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.AccountType
+import com.hj0128.moneybook.data.model.PeriodUnit
+import com.hj0128.moneybook.data.repository.AccountLimit
+import com.hj0128.moneybook.ui.common.LimitGauge
 import com.hj0128.moneybook.ui.common.ReorderableList
 import com.hj0128.moneybook.ui.theme.CategoryPalette
 import com.hj0128.moneybook.ui.theme.paletteColorOrDefault
@@ -250,6 +253,10 @@ private fun AccountRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (account.hasLimit) {
+                Spacer(Modifier.height(6.dp))
+                LimitGauge(account = account, modifier = Modifier.padding(bottom = 8.dp))
+            }
         }
         IconButton(onClick = onEdit) {
             Icon(
@@ -275,7 +282,13 @@ private fun AccountEditDialog(
     target: AccountEditTarget,
     errorMessage: String?,
     onDismiss: () -> Unit,
-    onSubmit: (name: String, type: AccountType, colorArgb: Int, initialBalance: Long) -> Unit,
+    onSubmit: (
+        name: String,
+        type: AccountType,
+        colorArgb: Int,
+        initialBalance: Long,
+        limit: AccountLimit?,
+    ) -> Unit,
     onErrorShown: () -> Unit,
 ) {
     val existing = (target as? AccountEditTarget.Edit)?.account
@@ -285,7 +298,13 @@ private fun AccountEditDialog(
         mutableIntStateOf(paletteColorOrDefault(existing?.colorArgb))
     }
     // 초기 잔액은 현재 잔액이 아니다. 현재 잔액은 거래를 누적해 나오는 값이라 여기서 못 고친다.
-    var initialBalanceText by remember(target) { mutableStateOf("") }
+    // 수정할 때는 저장된 값을 채워 둔다. 비워 두면 색만 바꿔도 시작 잔액이 0으로 덮인다.
+    var initialBalanceText by remember(target) {
+        mutableStateOf(existing?.initialBalance?.takeIf { it != 0L }?.toString().orEmpty())
+    }
+    // null 이면 한도 없음. 대부분의 자산은 한도가 없어서 기본값도 없음이다.
+    var limitPeriod by remember(target) { mutableStateOf(existing?.limitPeriod) }
+    var limitText by remember(target) { mutableStateOf(existing?.limitAmount?.toString().orEmpty()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -293,7 +312,8 @@ private fun AccountEditDialog(
         text = {
             Column(
                 modifier = Modifier
-                    .heightIn(max = 420.dp)
+                    // 한도 칸까지 처음부터 보이게 넉넉히 둔다. 잘려서 스크롤해야 보이면 있는 줄 모른다.
+                    .heightIn(max = 600.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
                 OutlinedTextField(
@@ -345,20 +365,69 @@ private fun AccountEditDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                 )
+
+                Spacer(Modifier.height(16.dp))
+                DialogLabel("사용 한도")
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    limitOptions.forEachIndexed { index, option ->
+                        SegmentedButton(
+                            selected = option == limitPeriod,
+                            onClick = { limitPeriod = option },
+                            shape = SegmentedButtonDefaults.itemShape(index, limitOptions.size),
+                        ) {
+                            Text(option.limitLabel())
+                        }
+                    }
+                }
+                if (limitPeriod != null) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = limitText,
+                        onValueChange = { input -> limitText = input.filter { it.isDigit() } },
+                        label = { Text("한도 금액") },
+                        supportingText = {
+                            Text(
+                                when (limitPeriod) {
+                                    PeriodUnit.YEAR -> "매년 1월 1일에 사용액이 0부터 다시 셉니다."
+                                    else -> "매월 1일에 사용액이 0부터 다시 셉니다."
+                                }
+                            )
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    onSubmit(name, type, colorArgb, initialBalanceText.toLongOrNull() ?: 0L)
+                    onSubmit(
+                        name,
+                        type,
+                        colorArgb,
+                        initialBalanceText.toLongOrNull() ?: 0L,
+                        limitPeriod?.let { AccountLimit(limitText.toLongOrNull() ?: 0L, it) },
+                    )
                 },
-                enabled = name.isNotBlank(),
+                // 한도를 고르고 금액을 비워 두면 무엇을 셀지 정할 수 없다. 저장 전에 막는다.
+                enabled = name.isNotBlank() && (limitPeriod == null || (limitText.toLongOrNull() ?: 0L) > 0L),
             ) { Text("저장") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("취소") }
         },
     )
+}
+
+/** 한도 선택지. null 은 "없음"이다. */
+private val limitOptions: List<PeriodUnit?> = listOf(null, PeriodUnit.MONTH, PeriodUnit.YEAR)
+
+private fun PeriodUnit?.limitLabel(): String = when (this) {
+    null -> "없음"
+    PeriodUnit.MONTH -> "매월"
+    PeriodUnit.YEAR -> "매년"
 }
 
 @Composable

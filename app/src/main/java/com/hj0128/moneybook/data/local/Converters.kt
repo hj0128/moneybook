@@ -2,6 +2,7 @@ package com.hj0128.moneybook.data.local
 
 import androidx.room.TypeConverter
 import com.hj0128.moneybook.data.model.AccountType
+import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.model.TransactionType
 
 /**
@@ -20,4 +21,11 @@ class Converters {
 
     @TypeConverter
     fun fromAccountType(value: AccountType): String = value.name
+
+    /** 한도 주기. 한도가 없는 자산은 null 이다. */
+    @TypeConverter
+    fun toPeriodUnit(value: String?): PeriodUnit? = value?.let { PeriodUnit.valueOf(it) }
+
+    @TypeConverter
+    fun fromPeriodUnit(value: PeriodUnit?): String? = value?.name
 }

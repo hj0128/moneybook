@@ -208,6 +208,96 @@ interface TransactionDao {
         endEpochDay: Long,
     ): Flow<List<TransactionDetail>>
 
+    /**
+     * 결제수단별 집계. 카테고리별 탭에서 기준을 "결제수단"으로 바꿨을 때 쓴다.
+     *
+     * 줄 모양이 카테고리와 같아서 CategoryTotal 을 그대로 쓴다(category_id 자리에 자산 id).
+     * 이체는 type 조건에서 빠진다. 자산 사이 이동이지 쓴 돈이 아니다.
+     */
+    @Query(
+        """
+        SELECT a.id AS category_id,
+               a.name AS name,
+               a.color_argb AS color_argb,
+               SUM(t.amount) AS total,
+               COUNT(t.id) AS entry_count,
+               a.sort_order AS sort_order
+        FROM transactions AS t
+        INNER JOIN accounts AS a ON a.id = t.account_id
+        WHERE t.type = :type
+          AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
+        GROUP BY a.id, a.name, a.color_argb, a.sort_order
+        ORDER BY total DESC
+        """
+    )
+    fun observeAccountTotals(
+        type: TransactionType,
+        startEpochDay: Long,
+        endEpochDay: Long,
+    ): Flow<List<CategoryTotal>>
+
+    /** 결제수단 상세용. 한 자산으로 낸(받은) 기간 내 내역을 최신순으로. */
+    @Query(
+        """
+        SELECT t.id AS id,
+               t.amount AS amount,
+               t.type AS type,
+               t.date_epoch_day AS date_epoch_day,
+               t.merchant AS merchant,
+               t.memo AS memo,
+               t.category_id AS category_id,
+               c.name AS category_name,
+               c.color_argb AS category_color,
+               a.name AS account_name,
+               ta.name AS to_account_name
+        FROM transactions AS t
+        LEFT JOIN categories AS c ON c.id = t.category_id
+        LEFT JOIN accounts AS a ON a.id = t.account_id
+        LEFT JOIN accounts AS ta ON ta.id = t.to_account_id
+        WHERE t.account_id = :accountId
+          AND t.type = :type
+          AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
+        ORDER BY t.date_epoch_day DESC, t.created_at DESC
+        """
+    )
+    fun observeByAccount(
+        accountId: Long,
+        type: TransactionType,
+        startEpochDay: Long,
+        endEpochDay: Long,
+    ): Flow<List<TransactionDetail>>
+
+    /**
+     * 결제수단 상세의 카테고리별 소계("복지포인트로 무엇을 샀나").
+     *
+     * 소분류는 대분류로 합친다. 카테고리가 빠진 거래도 미분류 한 줄로 넣는다.
+     * 빼면 이 소계의 합이 위 합계와 어긋난다. 미분류의 id 는 실제 id 와 겹치지 않게 -1 이다.
+     */
+    @Query(
+        """
+        SELECT COALESCE(p.id, c.id, -1) AS category_id,
+               COALESCE(p.name, c.name, '미분류') AS name,
+               COALESCE(p.color_argb, c.color_argb, -7303024) AS color_argb,
+               SUM(t.amount) AS total,
+               COUNT(t.id) AS entry_count,
+               COALESCE(p.sort_order, c.sort_order, 2147483647) AS sort_order
+        FROM transactions AS t
+        LEFT JOIN categories AS c ON c.id = t.category_id
+        LEFT JOIN categories AS p ON p.id = c.parent_id
+        WHERE t.account_id = :accountId
+          AND t.type = :type
+          AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
+        GROUP BY COALESCE(p.id, c.id, -1)
+        ORDER BY total DESC
+        """
+    )
+    fun observeAccountCategoryTotals(
+        accountId: Long,
+        type: TransactionType,
+        startEpochDay: Long,
+        endEpochDay: Long,
+    ): Flow<List<CategoryTotal>>
+
     /** 일괄 재분류. 고른 내역을 한 카테고리로 옮긴다. */
     @Query("UPDATE transactions SET category_id = :categoryId WHERE id IN (:ids)")
     suspend fun assignCategory(ids: List<Long>, categoryId: Long)

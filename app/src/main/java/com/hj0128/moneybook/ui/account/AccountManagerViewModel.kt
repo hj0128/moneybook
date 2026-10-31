@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hj0128.moneybook.appContainer
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.AccountType
+import com.hj0128.moneybook.data.repository.AccountLimit
 import com.hj0128.moneybook.data.repository.LedgerRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -110,15 +111,22 @@ class AccountManagerViewModel(
         _errorMessage.value = null
     }
 
-    fun submitEdit(name: String, type: AccountType, colorArgb: Int, initialBalance: Long) {
+    fun submitEdit(
+        name: String,
+        type: AccountType,
+        colorArgb: Int,
+        initialBalance: Long,
+        limit: AccountLimit?,
+    ) {
         val target = _editTarget.value ?: return
         viewModelScope.launch {
             val result = when (target) {
                 AccountEditTarget.New ->
-                    repository.addAccount(name, type, colorArgb, initialBalance).map { }
+                    repository.addAccount(name, type, colorArgb, initialBalance, limit).map { }
 
-                is AccountEditTarget.Edit ->
-                    repository.updateAccount(target.account.id, name, type, colorArgb, initialBalance)
+                is AccountEditTarget.Edit -> repository.updateAccount(
+                    target.account.id, name, type, colorArgb, initialBalance, limit,
+                )
             }
             result
                 .onSuccess { dismissEdit() }

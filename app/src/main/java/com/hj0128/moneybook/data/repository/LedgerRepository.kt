@@ -11,6 +11,7 @@ import com.hj0128.moneybook.data.model.AccountType
 import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.LedgerPeriod
+import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.toNodes
 import com.hj0128.moneybook.data.model.MonthlySummary
@@ -94,7 +95,45 @@ class LedgerRepository(
     fun observeCategoryTree(type: TransactionType): Flow<List<CategoryNode>> =
         categoryDao.observeByType(type).map { it.toNodes() }
 
-    fun observeAccounts(): Flow<List<AccountBalance>> = accountDao.observeBalances()
+    /**
+     * 자산 목록. 한도 사용액은 [today] 가 속한 달/해 기준이다.
+     *
+     * 화면이 떠 있는 동안 날짜가 바뀌어도 다시 구독하기 전까지는 이전 기간 기준이다.
+     * 가계부를 자정을 넘겨 켜 두는 일은 드물어서 그 정도는 감수한다.
+     */
+    fun observeAccounts(today: LocalDate = LocalDate.now()): Flow<List<AccountBalance>> {
+        val month = YearMonth.from(today)
+        return accountDao.observeBalances(
+            monthStart = month.atDay(1).toEpochDay(),
+            monthEnd = month.atEndOfMonth().toEpochDay(),
+            yearStart = LocalDate.of(today.year, 1, 1).toEpochDay(),
+            yearEnd = LocalDate.of(today.year, 12, 31).toEpochDay(),
+        )
+    }
+
+    fun observeAccount(id: Long): Flow<AccountBalance?> =
+        observeAccounts().map { accounts -> accounts.firstOrNull { it.id == id } }
+
+    fun observeAccountTotals(
+        period: LedgerPeriod,
+        type: TransactionType,
+    ): Flow<List<CategoryTotal>> =
+        transactionDao.observeAccountTotals(type, period.start.toEpochDay(), period.end.toEpochDay())
+
+    fun observeAccountTransactions(
+        period: LedgerPeriod,
+        accountId: Long,
+        type: TransactionType,
+    ): Flow<List<TransactionDetail>> =
+        transactionDao.observeByAccount(accountId, type, period.start.toEpochDay(), period.end.toEpochDay())
+
+    fun observeAccountCategoryTotals(
+        period: LedgerPeriod,
+        accountId: Long,
+        type: TransactionType,
+    ): Flow<List<CategoryTotal>> = transactionDao.observeAccountCategoryTotals(
+        accountId, type, period.start.toEpochDay(), period.end.toEpochDay(),
+    )
 
     // ---- 카테고리 관리 ----
 
@@ -257,9 +296,11 @@ class LedgerRepository(
         type: AccountType,
         colorArgb: Int,
         initialBalance: Long,
+        limit: AccountLimit? = null,
     ): Result<Long> {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("이름을 입력해 주세요."))
+        limit?.validate()?.let { return Result.failure(it) }
         if (accountDao.countSameName(trimmed, excludeId = 0L) > 0) {
             return Result.failure(IllegalArgumentException("같은 이름이 이미 있습니다."))
         }
@@ -270,6 +311,8 @@ class LedgerRepository(
                 colorArgb = colorArgb,
                 initialBalance = initialBalance,
                 sortOrder = accountDao.nextSortOrder(),
+                limitAmount = limit?.amount,
+                limitPeriod = limit?.period,
             )
         )
         return Result.success(id)
@@ -286,9 +329,11 @@ class LedgerRepository(
         type: AccountType,
         colorArgb: Int,
         initialBalance: Long,
+        limit: AccountLimit? = null,
     ): Result<Unit> {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("이름을 입력해 주세요."))
+        limit?.validate()?.let { return Result.failure(it) }
         val current = accountDao.findById(id)
             ?: return Result.failure(IllegalStateException("자산을 찾을 수 없습니다."))
         if (accountDao.countSameName(trimmed, excludeId = id) > 0) {
@@ -300,6 +345,8 @@ class LedgerRepository(
                 type = type,
                 colorArgb = colorArgb,
                 initialBalance = initialBalance,
+                limitAmount = limit?.amount,
+                limitPeriod = limit?.period,
             )
         )
         return Result.success(Unit)
@@ -318,6 +365,12 @@ class LedgerRepository(
         if (toId == null) accountDao.deleteById(id) else accountDao.deleteWithReassign(id, toId)
         return Result.success(Unit)
     }
+}
+
+/** 결제수단 한도. 금액과 주기는 늘 짝으로 다닌다. 한쪽만 있으면 무엇을 셀지 정할 수 없다. */
+data class AccountLimit(val amount: Long, val period: PeriodUnit) {
+    fun validate(): Throwable? =
+        if (amount <= 0L) IllegalArgumentException("한도 금액을 입력해 주세요.") else null
 }
 
 /** 삭제 다이얼로그가 무엇을 물어봐야 할지 정하는 근거. */

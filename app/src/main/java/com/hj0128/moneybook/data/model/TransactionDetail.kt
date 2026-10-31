@@ -68,7 +68,7 @@ data class MonthlySummary(
     val net: Long get() = income - expense
 }
 
-/** 자산 목록 + 현재 잔액. */
+/** 자산 목록 + 현재 잔액 + 한도 사용액. */
 data class AccountBalance(
     val id: Long,
     val name: String,
@@ -76,4 +76,29 @@ data class AccountBalance(
     @ColumnInfo(name = "color_argb")
     val colorArgb: Int,
     val balance: Long,
-)
+    /** 수정 창에 그대로 채워 넣기 위해 함께 읽는다. 없으면 저장할 때 0으로 덮어쓰게 된다. */
+    @ColumnInfo(name = "initial_balance")
+    val initialBalance: Long = 0L,
+    @ColumnInfo(name = "limit_amount")
+    val limitAmount: Long? = null,
+    @ColumnInfo(name = "limit_period")
+    val limitPeriod: PeriodUnit? = null,
+    /** 지금 주기(이번 달 또는 올해)에 이 자산으로 쓴 지출. 한도가 없으면 0. */
+    @ColumnInfo(name = "limit_used")
+    val limitUsed: Long = 0L,
+) {
+    val hasLimit: Boolean get() = limitAmount != null && limitPeriod != null
+
+    /** 음수면 초과한 금액이다. */
+    val limitRemaining: Long get() = (limitAmount ?: 0L) - limitUsed
+
+    val limitRatio: Float
+        get() = limitAmount?.takeIf { it > 0 }?.let { (limitUsed.toDouble() / it).toFloat() } ?: 0f
+
+    /** "올해" / "이번 달". 막대 옆에 무엇의 사용액인지 늘 같이 적는다. */
+    val limitPeriodLabel: String
+        get() = when (limitPeriod) {
+            PeriodUnit.YEAR -> "올해"
+            PeriodUnit.MONTH, null -> "이번 달"
+        }
+}
