@@ -15,6 +15,7 @@ import com.hj0128.moneybook.data.repository.LedgerRepository
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -167,8 +168,15 @@ data class CategoryDetailUiState(
 class CategoryDetailViewModel(
     private val repository: LedgerRepository,
     val source: DetailSource,
-    period: LedgerPeriod,
+    initialPeriod: LedgerPeriod,
 ) : ViewModel() {
+
+    /**
+     * 보고 있는 기간. 목록에서 넘겨받은 기간으로 시작해 이 화면 안에서 앞뒤로 옮길 수 있다.
+     * 지난달과 비교하려고 목록으로 나갔다 다시 들어오지 않아도 된다.
+     */
+    private val _period = MutableStateFlow(initialPeriod)
+    val period: StateFlow<LedgerPeriod> = _period.asStateFlow()
 
     /**
      * 선택 모드는 상단바 버튼으로만 켠다.
@@ -182,7 +190,14 @@ class CategoryDetailViewModel(
     private val _selectedIds = MutableStateFlow<Set<Long>>(emptySet())
     val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
 
-    val state: StateFlow<CategoryDetailUiState> = when (source) {
+    val state: StateFlow<CategoryDetailUiState> = _period.flatMapLatest { period -> detailFlow(period) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = CategoryDetailUiState(initialPeriod),
+        )
+
+    private fun detailFlow(period: LedgerPeriod): Flow<CategoryDetailUiState> = when (source) {
         is DetailSource.Category -> combine(
             repository.observeCategoryTransactions(period, source.id),
             repository.observeCategory(source.id),
@@ -227,11 +242,18 @@ class CategoryDetailViewModel(
                     groups = items.toDayGroups(),
                 )
             }
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = CategoryDetailUiState(period),
-    )
+    }
+
+    /** 고른 내역은 그 기간의 것이라 기간을 옮기면 선택을 푼다. 안 보이는 내역이 옮겨지면 안 된다. */
+    fun showPrevious() {
+        exitSelection()
+        _period.update { it.shifted(-1) }
+    }
+
+    fun showNext() {
+        exitSelection()
+        _period.update { it.shifted(1) }
+    }
 
     /**
      * 재분류로 보낼 수 있는 카테고리.
@@ -300,7 +322,7 @@ class CategoryDetailViewModel(
                     CategoryDetailViewModel(
                         repository = appContainer().ledgerRepository,
                         source = source,
-                        period = period,
+                        initialPeriod = period,
                     )
                 }
             }

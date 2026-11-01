@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
@@ -68,8 +70,10 @@ import kotlin.math.roundToInt
 /**
  * 카테고리 상세: 카테고리별 탭에서 한 줄을 눌렀을 때 그 카테고리의 그 기간 내역만 보여준다.
  *
- * 기간(한 달 또는 한 해)은 넘겨받은 값으로 고정한다. 여기서 기간을 옮길 수 있게 하면
- * 뒤로 갔을 때 목록의 기간과 어긋나 어디를 보고 있었는지 잃어버린다.
+ * 넘겨받은 기간(한 달 또는 한 해)으로 시작하고, 위의 ‹ › 로 같은 단위만큼 옮길 수 있다.
+ * 지난달과 견주려고 목록으로 나갔다 다시 들어오는 번거로움을 없앤다.
+ * 뒤로 가면 목록은 원래 보던 기간 그대로다. 여기서 옮긴 기간을 목록까지 끌고 가면
+ * 목록에서 무엇을 보고 있었는지 잃는다.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,6 +87,8 @@ fun CategoryDetailScreen(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // 제목의 기간은 내역보다 먼저 바뀌어야 한다. 불러오는 동안 이전 기간 이름이 남으면 안 눌린 줄 안다.
+    val currentPeriod by viewModel.period.collectAsStateWithLifecycle()
     val inSelectionMode by viewModel.selectionMode.collectAsStateWithLifecycle()
     val selectedIds by viewModel.selectedIds.collectAsStateWithLifecycle()
     val assignable by viewModel.assignableCategories.collectAsStateWithLifecycle()
@@ -129,7 +135,7 @@ fun CategoryDetailScreen(
                                 Spacer(Modifier.width(8.dp))
                             }
                             Text(
-                                text = "${state.period.shortLabel} · ${state.categoryName}",
+                                text = state.categoryName,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -161,6 +167,13 @@ fun CategoryDetailScreen(
                 .padding(innerPadding)
                 .fillMaxSize(),
         ) {
+            // 목록과 함께 스크롤하지 않는다. 내려가서 보다가도 바로 다음 달로 넘길 수 있어야 한다.
+            DetailPeriodBar(
+                label = currentPeriod.label,
+                enabled = !inSelectionMode,
+                onPrevious = viewModel::showPrevious,
+                onNext = viewModel::showNext,
+            )
             if (state.isEmpty) {
                 CategoryDetailHeader(state)
                 EmptyPlaceholder("${state.period.label}에는\n${state.categoryName} 내역이 없습니다.")
@@ -388,6 +401,34 @@ private val TrendBarMaxHeight = 96.dp
  * 이 화면의 존재 이유라서 목록보다 위에 둔다. 아래 내역은 개별 건을 확인하는 용도고,
  * 어디에 쏠렸는지는 여기서 한눈에 끝나야 한다.
  */
+/** ‹ 2026년 10월 › . 메인 화면 상단과 같은 모양이라 같은 동작으로 읽힌다. */
+@Composable
+private fun DetailPeriodBar(
+    label: String,
+    enabled: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onPrevious, enabled = enabled) {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "이전")
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+        IconButton(onClick = onNext, enabled = enabled) {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "다음")
+        }
+    }
+}
+
 @Composable
 private fun ChildBreakdown(
     state: CategoryDetailUiState,

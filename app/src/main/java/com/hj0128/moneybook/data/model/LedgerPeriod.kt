@@ -29,6 +29,9 @@ sealed interface LedgerPeriod {
     /** 빈 화면 문구용. "이 달" / "이 해" */
     val thisLabel: String
 
+    /** 같은 단위로 [by] 칸 옮긴 기간. 한 달이면 달을, 한 해면 해를 옮긴다. */
+    fun shifted(by: Int): LedgerPeriod
+
     data class Month(val yearMonth: YearMonth) : LedgerPeriod {
         override val start: LocalDate get() = yearMonth.atDay(1)
         override val end: LocalDate get() = yearMonth.atEndOfMonth()
@@ -36,6 +39,7 @@ sealed interface LedgerPeriod {
         override val label: String get() = "${yearMonth.year}년 ${yearMonth.monthValue}월"
         override val shortLabel: String get() = "${yearMonth.monthValue}월"
         override val thisLabel: String get() = "이 달"
+        override fun shifted(by: Int): LedgerPeriod = Month(yearMonth.plusMonths(by.toLong()))
     }
 
     data class Year(val year: Int) : LedgerPeriod {
@@ -45,6 +49,7 @@ sealed interface LedgerPeriod {
         override val label: String get() = "${year}년"
         override val shortLabel: String get() = label
         override val thisLabel: String get() = "이 해"
+        override fun shifted(by: Int): LedgerPeriod = Year(year + by)
     }
 
     companion object {
