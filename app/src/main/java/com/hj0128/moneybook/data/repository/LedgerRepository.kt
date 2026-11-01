@@ -2,9 +2,11 @@ package com.hj0128.moneybook.data.repository
 
 import com.hj0128.moneybook.data.local.dao.AccountDao
 import com.hj0128.moneybook.data.local.dao.CategoryDao
+import com.hj0128.moneybook.data.local.dao.RecurringDao
 import com.hj0128.moneybook.data.local.dao.TransactionDao
 import com.hj0128.moneybook.data.local.entity.AccountEntity
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
+import com.hj0128.moneybook.data.local.entity.RecurringEntity
 import com.hj0128.moneybook.data.local.entity.TransactionEntity
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.AccountType
@@ -15,9 +17,12 @@ import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.toNodes
 import com.hj0128.moneybook.data.model.MonthlySummary
+import com.hj0128.moneybook.data.model.RecurringDetail
+import com.hj0128.moneybook.data.model.RepeatUnit
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.UncategorizedTotal
+import com.hj0128.moneybook.util.formatFull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.time.LocalDate
@@ -28,6 +33,7 @@ class LedgerRepository(
     private val transactionDao: TransactionDao,
     private val categoryDao: CategoryDao,
     private val accountDao: AccountDao,
+    private val recurringDao: RecurringDao,
 ) {
 
     fun observeMonth(yearMonth: YearMonth): Flow<List<TransactionDetail>> {
@@ -316,7 +322,8 @@ class LedgerRepository(
             return Result.failure(IllegalArgumentException("나눈 금액은 모두 0보다 커야 합니다."))
         }
         // 고치는 중이면 처음 넣은 시각을 지킨다. 바꿀 때마다 같은 날 안에서 맨 위로 올라가면 어색하다.
-        val createdAt = replacingId?.let { transactionDao.findById(it)?.createdAt } ?: nowMillis
+        val original = replacingId?.let { transactionDao.findById(it) }
+        val createdAt = original?.createdAt ?: nowMillis
         val rows = parts.map { part ->
             TransactionEntity(
                 amount = part.amount,
@@ -327,11 +334,85 @@ class LedgerRepository(
                 merchant = merchant.trim(),
                 memo = part.memo.trim(),
                 createdAt = createdAt,
+                // 고정 지출로 들어온 내역을 나눠도 어디서 왔는지는 남긴다. 지워지면 그 달이 아직 안 들어간 것처럼 보인다.
+                recurringId = original?.recurringId,
             )
         }
         transactionDao.replacePayment(replacingId, rows)
         return Result.success(Unit)
     }
+
+    // ---- 고정 지출 ----
+
+    fun observeRecurring(): Flow<List<RecurringDetail>> = recurringDao.observeAll()
+
+    suspend fun findRecurring(id: Long): RecurringEntity? = recurringDao.findById(id)
+
+    /**
+     * 차례가 온 고정 지출을 내역으로 넣는다. 앱이 앞으로 나올 때마다 부른다.
+     * 돌려주는 값은 넣은 줄 수.
+     */
+    suspend fun applyRecurring(today: LocalDate = LocalDate.now()): Int =
+        recurringDao.applyDue(today, System.currentTimeMillis())
+
+    /**
+     * 고정 지출 저장. [id] 가 있으면 그것을 고친다.
+     *
+     * [firstDate] 가 다음에 넣을 날이 되고, [anchor] 가 주기를 정한다(매주 그 요일, 매월 그 일, 매년 그 월·일).
+     * 보통은 둘이 같은 날이다. 31일짜리의 다음 날짜가 30일인 경우처럼 고칠 때만 다를 수 있다.
+     * 오늘이거나 지난 날이면 저장하자마자 그날 것(밀린 것까지)이 들어간다. 앞날이면 그날이 와야 들어간다.
+     * 고쳐도 이미 들어간 내역은 그대로다. 지난달 통신비가 바뀐 요금으로 다시 쓰이면 기록이 틀어진다.
+     */
+    suspend fun saveRecurring(
+        id: Long?,
+        amount: Long,
+        type: TransactionType,
+        categoryId: Long?,
+        accountId: Long,
+        toAccountId: Long?,
+        repeatUnit: RepeatUnit,
+        firstDate: LocalDate,
+        anchor: LocalDate,
+        merchant: String,
+        memo: String,
+    ): Result<Unit> {
+        if (amount <= 0) return Result.failure(IllegalArgumentException("금액은 0보다 커야 합니다."))
+        val transfer = type == TransactionType.TRANSFER
+        if (transfer && (toAccountId == null || toAccountId == accountId)) {
+            return Result.failure(IllegalArgumentException("출금 자산과 입금 자산을 확인해 주세요."))
+        }
+        // 이미 들어간 칸(그 달, 그 해)으로 되돌리면 그 칸이 한 번 더 들어간다.
+        // 다음 날짜는 마지막으로 넣은 칸 뒤여야 한다.
+        val lastEntered = id?.let { recurringDao.lastEnteredEpochDay(it) }?.let(LocalDate::ofEpochDay)
+        if (lastEntered != null && repeatUnit.periodStart(firstDate) <= repeatUnit.periodStart(lastEntered)) {
+            val earliest = repeatUnit.nextPeriodStart(lastEntered)
+            return Result.failure(
+                IllegalArgumentException(
+                    "${lastEntered.formatFull()} 것까지 이미 들어갔습니다. 다음 날짜를 ${earliest.formatFull()}부터 골라 주세요."
+                )
+            )
+        }
+        val now = System.currentTimeMillis()
+        val rule = RecurringEntity(
+            id = id ?: 0L,
+            amount = amount,
+            type = type,
+            categoryId = if (transfer) null else categoryId,
+            accountId = accountId,
+            toAccountId = if (transfer) toAccountId else null,
+            merchant = merchant.trim(),
+            memo = memo.trim(),
+            repeatUnit = repeatUnit,
+            anchorEpochDay = anchor.toEpochDay(),
+            nextEpochDay = firstDate.toEpochDay(),
+            createdAt = id?.let { recurringDao.findById(it)?.createdAt } ?: now,
+        )
+        if (id == null) recurringDao.insert(rule) else recurringDao.update(rule)
+        applyRecurring()
+        return Result.success(Unit)
+    }
+
+    suspend fun deleteRecurring(id: Long) = recurringDao.deleteById(id)
 
     // ---- 자산 관리 ----
 

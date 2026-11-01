@@ -14,11 +14,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -192,12 +195,25 @@ fun TransactionRow(
         }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                // 손으로 넣지 않았는데 생긴 줄이다. 무엇인지 모르고 지우지 않게 표시해 둔다.
+                if (item.recurringId != null) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Default.Autorenew,
+                        contentDescription = "고정 지출",
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
             // 메모(무엇을 샀는지)를 카테고리·결제수단보다 위에 둔다. 나눈 결제의 줄과 같은 순서라
             // 일별 탭에서 두 모양이 섞여도 같은 자리에 같은 값이 온다.
             // 카테고리·결제수단과 한 줄에 잇지 않는 건 메모 길이를 가늠할 수 없어서다.

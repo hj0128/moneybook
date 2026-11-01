@@ -43,8 +43,17 @@ interface CategoryDao {
         excludeId: Long,
     ): Int
 
-    /** 이 카테고리에 '직접' 붙은 거래 수. 소분류 것은 세지 않는다. */
-    @Query("SELECT COUNT(*) FROM transactions WHERE category_id = :categoryId")
+    /**
+     * 이 카테고리에 '직접' 붙은 거래 수. 소분류 것은 세지 않는다.
+     *
+     * 고정 지출도 센다. 안 세면 그냥 지워져서 고정 지출이 다음 달부터 미분류로 들어간다.
+     */
+    @Query(
+        """
+        SELECT (SELECT COUNT(*) FROM transactions WHERE category_id = :categoryId)
+             + (SELECT COUNT(*) FROM recurring WHERE category_id = :categoryId)
+        """
+    )
     suspend fun countDirectUsage(categoryId: Long): Int
 
     @Query("SELECT COUNT(*) FROM categories WHERE parent_id = :categoryId")
@@ -52,6 +61,9 @@ interface CategoryDao {
 
     @Query("UPDATE transactions SET category_id = :toId WHERE category_id = :fromId")
     suspend fun reassignTransactions(fromId: Long, toId: Long)
+
+    @Query("UPDATE recurring SET category_id = :toId WHERE category_id = :fromId")
+    suspend fun reassignRecurring(fromId: Long, toId: Long)
 
     @Query("UPDATE categories SET parent_id = :toParentId WHERE parent_id = :fromParentId")
     suspend fun reassignChildren(fromParentId: Long, toParentId: Long)
@@ -70,6 +82,7 @@ interface CategoryDao {
     suspend fun deleteWithReassign(categoryId: Long, reassignToId: Long?) {
         if (reassignToId != null) {
             reassignTransactions(categoryId, reassignToId)
+            reassignRecurring(categoryId, reassignToId)
             reassignChildren(categoryId, reassignToId)
         }
         deleteById(categoryId)

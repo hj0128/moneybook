@@ -9,6 +9,7 @@ import com.hj0128.moneybook.appContainer
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.CategoryNode
+import com.hj0128.moneybook.data.model.RepeatUnit
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.flatten
 import com.hj0128.moneybook.data.repository.LedgerRepository
@@ -54,8 +55,28 @@ data class EntryUiState(
     val keypadTarget: Int? = null,
     /** 고치는 내역이 이미 나눈 결제였는지. 한 줄로 되돌려도 묶음을 지우고 다시 저장해야 한다. */
     val editingSplit: Boolean = false,
+    /** 반복 주기. null 이면 반복하지 않는다. 새로 넣을 때와 고정 지출을 고칠 때만 고를 수 있다. */
+    val repeatUnit: RepeatUnit? = null,
+    /** 고정 지출 자체를 고치는 중이면 그 id. 이때 날짜는 "다음에 넣을 날"이다. */
+    val editingRecurringId: Long? = null,
+    /** 고치는 내역이 고정 지출이 넣은 것이면 그 고정 지출. 이 내역만 바뀐다는 것을 알려준다. */
+    val sourceRecurring: SourceRecurring? = null,
+    /**
+     * 불러온 고정 지출의 기준일. 날짜나 주기를 새로 고르기 전까지 지킨다.
+     *
+     * 31일짜리의 다음 날짜는 11월 30일일 수 있다. 날짜에서 다시 읽으면 손대지 않고 저장만 해도 30일로 바뀐다.
+     */
+    val keptAnchor: LocalDate? = null,
 ) {
+    /** 주기를 정하는 날. 매주면 이 날의 요일, 매월이면 일, 매년이면 월·일. */
+    val repeatAnchor: LocalDate get() = keptAnchor ?: date
+
     val isEditing: Boolean get() = editingId != null
+
+    val isEditingRecurring: Boolean get() = editingRecurringId != null
+
+    /** 저장하면 내역이 아니라 고정 지출이 만들어지거나 바뀐다. */
+    val savesRecurring: Boolean get() = isEditingRecurring || (repeatUnit != null && !isEditing)
 
     val isSplit: Boolean get() = parts.isNotEmpty()
 
@@ -102,15 +123,25 @@ data class EntryUiState(
 class EntryViewModel(
     private val repository: LedgerRepository,
     private val editingId: Long? = null,
+    private val recurringId: Long? = null,
+    startRepeating: Boolean = false,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(EntryUiState(editingId = editingId))
+    private val _uiState = MutableStateFlow(
+        EntryUiState(
+            editingId = editingId,
+            editingRecurringId = recurringId,
+            // 고정 지출 화면에서 추가하면 가장 흔한 매월로 시작한다. 고칠 때는 불러온 값으로 바뀐다.
+            repeatUnit = if (startRepeating || recurringId != null) RepeatUnit.MONTH else null,
+        )
+    )
     val uiState: StateFlow<EntryUiState> = _uiState.asStateFlow()
 
     init {
         // 지출 카테고리를 기본으로 먼저 띄운다(가장 많이 쓰는 입력이라).
         observeCategories(TransactionType.EXPENSE)
         if (editingId != null) loadForEdit(editingId)
+        if (recurringId != null) loadRecurring(recurringId)
         viewModelScope.launch {
             repository.observeAccounts().collect { accounts ->
                 _uiState.update { state ->
@@ -155,6 +186,44 @@ class EntryViewModel(
             }
             // 종류가 지출이 아니면 그 종류의 카테고리를 다시 구독해야 한다.
             if (entity.type != TransactionType.EXPENSE) observeCategories(entity.type)
+            val source = entity.recurringId?.let { repository.findRecurring(it) }
+            if (source != null) {
+                val label = source.repeatUnit.describe(source.anchor)
+                _uiState.update { it.copy(sourceRecurring = SourceRecurring(source.id, label)) }
+            }
+        }
+    }
+
+    /** 고정 지출을 고치는 화면. 내역 화면과 같은 칸을 쓰고, 날짜 칸에 다음에 넣을 날을 채운다. */
+    private fun loadRecurring(id: Long) {
+        viewModelScope.launch {
+            val rule = repository.findRecurring(id) ?: return@launch
+            _uiState.update { state ->
+                state.copy(
+                    type = rule.type,
+                    amountText = rule.amount.toString(),
+                    date = rule.nextDate,
+                    merchant = rule.merchant,
+                    memo = rule.memo,
+                    selectedCategoryId = rule.categoryId,
+                    selectedAccountId = rule.accountId,
+                    selectedToAccountId = rule.toAccountId,
+                    repeatUnit = rule.repeatUnit,
+                    keptAnchor = rule.anchor,
+                )
+            }
+            if (rule.type != TransactionType.EXPENSE) observeCategories(rule.type)
+        }
+    }
+
+    /**
+     * 주기를 바꾸면 기준일도 지금 날짜로 다시 잡는다. 31일짜리 매월을 매주로 바꿨는데 기준일이 8월 31일로
+     * 남아 있으면, 화면의 날짜와 다른 요일이 적혀 무엇이 들어갈지 알 수 없다.
+     */
+    fun setRepeatUnit(unit: RepeatUnit?) {
+        _uiState.update { state ->
+            if (state.repeatUnit == unit) state
+            else state.copy(repeatUnit = unit, keptAnchor = null, errorMessage = null)
         }
     }
 
@@ -338,7 +407,8 @@ class EntryViewModel(
     }
 
     fun selectDate(date: LocalDate) {
-        _uiState.update { it.copy(date = date) }
+        // 날짜를 새로 고르면 그 날의 "일"이 매달 넣을 날이 된다.
+        _uiState.update { it.copy(date = date, keptAnchor = null) }
     }
 
     fun updateMerchant(merchant: String) {
@@ -361,6 +431,14 @@ class EntryViewModel(
 
     /** 수정 중인 내역 삭제. 목록에서 길게 누르는 것과 같은 동작을 이 화면에도 둔다. */
     fun delete() {
+        _uiState.value.editingRecurringId?.let { recurring ->
+            viewModelScope.launch {
+                // 그만두기만 한다. 이미 들어간 내역은 실제로 나간 돈이라 남는다.
+                repository.deleteRecurring(recurring)
+                _uiState.update { it.copy(isDeleted = true) }
+            }
+            return
+        }
         val id = _uiState.value.editingId ?: return
         viewModelScope.launch {
             // 이 화면은 결제 하나를 통째로 다룬다. 나눈 결제면 묶음 전체가 지워진다.
@@ -376,6 +454,10 @@ class EntryViewModel(
             return
         }
         val id = state.editingId
+        if (state.savesRecurring) {
+            saveRecurring(state)
+            return
+        }
         if (state.isSplit || state.editingSplit) {
             savePayment(state)
             return
@@ -418,6 +500,28 @@ class EntryViewModel(
             }.onFailure { error ->
                 _uiState.update { it.copy(errorMessage = error.message ?: "저장에 실패했습니다.") }
             }
+        }
+    }
+
+    private fun saveRecurring(state: EntryUiState) {
+        viewModelScope.launch {
+            repository.saveRecurring(
+                id = state.editingRecurringId,
+                amount = state.amount,
+                type = state.type,
+                categoryId = state.selectedCategoryId,
+                accountId = requireNotNull(state.selectedAccountId),
+                toAccountId = state.selectedToAccountId,
+                repeatUnit = state.repeatUnit ?: RepeatUnit.MONTH,
+                firstDate = state.date,
+                anchor = state.repeatAnchor,
+                merchant = state.merchant,
+                memo = state.memo,
+            )
+                .onSuccess { _uiState.update { it.copy(isSaved = true) } }
+                .onFailure { error ->
+                    _uiState.update { it.copy(errorMessage = error.message ?: "저장에 실패했습니다.") }
+                }
         }
     }
 
@@ -474,17 +578,29 @@ class EntryViewModel(
     }
 
     companion object {
-        /** [editingId] 가 있으면 그 내역을 고치는 화면이 된다. */
-        fun factory(editingId: Long? = null): ViewModelProvider.Factory = viewModelFactory {
+        /**
+         * [editingId] 가 있으면 그 내역을, [recurringId] 가 있으면 그 고정 지출을 고치는 화면이 된다.
+         * [startRepeating] 은 고정 지출 화면에서 "추가"로 들어왔을 때 반복을 켠 채 시작한다.
+         */
+        fun factory(
+            editingId: Long? = null,
+            recurringId: Long? = null,
+            startRepeating: Boolean = false,
+        ): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 EntryViewModel(
                     repository = appContainer().ledgerRepository,
                     editingId = editingId,
+                    recurringId = recurringId,
+                    startRepeating = startRepeating,
                 )
             }
         }
     }
 }
+
+/** 고치는 내역을 넣은 고정 지출. */
+data class SourceRecurring(val id: Long, val label: String)
 
 /** 나눠서 입력하는 한 줄. 금액은 키패드로 적은 글자 그대로 둔다(마지막 줄은 쓰지 않는다). */
 data class SplitPart(

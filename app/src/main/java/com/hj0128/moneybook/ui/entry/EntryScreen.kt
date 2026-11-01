@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
@@ -51,6 +52,8 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -78,6 +81,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -85,6 +89,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.CategoryNode
+import com.hj0128.moneybook.data.model.RepeatUnit
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatAmount
@@ -130,11 +135,14 @@ fun EntryScreen(
     onSaved: () -> Unit,
     modifier: Modifier = Modifier,
     editingId: Long? = null,
+    recurringId: Long? = null,
+    startRepeating: Boolean = false,
+    onOpenRecurring: (Long) -> Unit = {},
     viewModel: EntryViewModel = viewModel(
         // 고치는 내역이 바뀌면 다른 ViewModel 이어야 한다. key 를 안 주면 같은 것을 재사용해
         // 먼저 열었던 내역이 그대로 남는다.
-        key = editingId?.let { "entry-$it" },
-        factory = EntryViewModel.factory(editingId),
+        key = editingId?.let { "entry-$it" } ?: recurringId?.let { "recurring-$it" },
+        factory = EntryViewModel.factory(editingId, recurringId, startRepeating),
     ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -162,7 +170,17 @@ fun EntryScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text(if (state.isEditing) "내역 수정" else "내역 추가") },
+                title = {
+                    Text(
+                        when {
+                            state.isEditingRecurring -> "고정 지출 수정"
+                            state.isEditing -> "내역 수정"
+                            // 반복을 켜면 저장되는 것이 달라진다. 제목도 따라 바꿔 무엇을 만드는지 알린다.
+                            state.repeatUnit != null -> "고정 지출 추가"
+                            else -> "내역 추가"
+                        }
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
                         Icon(Icons.Default.Close, contentDescription = "닫기")
@@ -170,9 +188,12 @@ fun EntryScreen(
                 },
                 actions = {
                     // 목록에서 길게 눌러 지우는 길만 있으면 찾기 어렵다. 여기에도 둔다.
-                    if (state.isEditing) {
+                    if (state.isEditing || state.isEditingRecurring) {
                         IconButton(onClick = { confirmDelete = true }) {
-                            Icon(Icons.Default.Delete, contentDescription = "이 내역 삭제")
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = if (state.isEditingRecurring) "고정 지출 그만두기" else "이 내역 삭제",
+                            )
                         }
                     }
                 },
@@ -232,11 +253,26 @@ fun EntryScreen(
                     }
 
                     PickerRow(
-                        label = "날짜",
+                        // 고정 지출을 고칠 때 날짜는 언제 썼는지가 아니라 언제 넣을지다.
+                        label = if (state.isEditingRecurring) "다음 날짜" else "날짜",
                         value = state.date.formatFull(),
                         divider = !state.isSplit,
                         onClick = { dismissInputs(); showDatePicker = true },
                     )
+
+                    // 이미 있는 내역을 고칠 때는 고르지 않는다. 그 내역 한 줄을 고치는 화면이라
+                    // 여기서 반복을 켜면 무엇이 생기는지 알기 어렵다. 나눈 결제도 반복하지 않는다.
+                    if (!state.isEditing && !state.isSplit) {
+                        RepeatRow(
+                            selected = state.repeatUnit,
+                            anchor = state.repeatAnchor,
+                            date = state.date,
+                            // 고정 지출을 고치는 중에 "안 함"을 고르면 무엇이 되는지 애매하다. 그만두기는 삭제 버튼으로 한다.
+                            allowNone = !state.isEditingRecurring,
+                            onOpen = dismissInputs,
+                            onSelect = viewModel::setRepeatUnit,
+                        )
+                    }
 
                     if (state.isTransfer) {
                         PickerRow(
@@ -272,7 +308,18 @@ fun EntryScreen(
                     }
                 }
 
-                if (!state.isTransfer) {
+                state.sourceRecurring?.let { source ->
+                    RecurringNotice(
+                        label = source.label,
+                        onOpen = { onOpenRecurring(source.id) },
+                    )
+                }
+
+                if (state.repeatUnit != null && !state.isEditing) {
+                    RepeatHint(state)
+                }
+
+                if (!state.isTransfer && !state.savesRecurring) {
                     if (state.isSplit) {
                         Spacer(Modifier.height(16.dp))
                         SplitSection(
@@ -365,12 +412,21 @@ fun EntryScreen(
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
             title = {
-                Text(if (state.editingSplit) "나눈 결제 전체를 삭제할까요?" else "이 내역을 삭제할까요?")
+                Text(
+                    when {
+                        state.isEditingRecurring -> "고정 지출을 그만둘까요?"
+                        state.editingSplit -> "나눈 결제 전체를 삭제할까요?"
+                        else -> "이 내역을 삭제할까요?"
+                    }
+                )
             },
             text = {
                 Text(
-                    if (state.editingSplit) "나눠 저장한 줄이 모두 삭제됩니다. 되돌릴 수 없습니다."
-                    else "삭제하면 되돌릴 수 없습니다."
+                    when {
+                        state.isEditingRecurring -> "다음 달부터 자동으로 들어가지 않습니다. 이미 들어간 내역은 그대로 남습니다."
+                        state.editingSplit -> "나눠 저장한 줄이 모두 삭제됩니다. 되돌릴 수 없습니다."
+                        else -> "삭제하면 되돌릴 수 없습니다."
+                    }
                 )
             },
             confirmButton = {
@@ -546,6 +602,126 @@ private fun PickerRow(
         )
     }
     if (divider) RowDivider()
+}
+
+/**
+ * 반복 고르기. 안 함 / 매주 / 매월 / 매년.
+ *
+ * 고를 것마다 지금 날짜로 무엇이 되는지("매주 일요일", "매년 11월 1일")를 같이 보여준다.
+ * "매주"만 적어 두면 무슨 요일인지 고르고 나서야 알 수 있다.
+ */
+@Composable
+private fun RepeatRow(
+    selected: RepeatUnit?,
+    anchor: LocalDate,
+    date: LocalDate,
+    allowNone: Boolean,
+    onOpen: () -> Unit,
+    onSelect: (RepeatUnit?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    // 메뉴를 줄 바로 아래에 띄우려고 Box 로 감싼다. 줄과 구분선은 Column 에 담아야 Box 안에서 겹치지 않는다.
+    Box {
+        Column {
+            PickerRow(
+                label = "반복",
+                value = selected?.describe(anchor) ?: "안 함",
+                onClick = {
+                    onOpen()
+                    expanded = true
+                },
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            offset = DpOffset(x = LabelWidth, y = 0.dp),
+        ) {
+            if (allowNone) {
+                RepeatOption(text = "안 함", checked = selected == null) {
+                    expanded = false
+                    onSelect(null)
+                }
+            }
+            RepeatUnit.entries.forEach { unit ->
+                // 지금 고른 주기는 지켜 둔 기준일로, 다른 주기는 바꾸면 기준이 될 화면의 날짜로 보여준다.
+                RepeatOption(
+                    text = unit.describe(if (unit == selected) anchor else date),
+                    checked = unit == selected,
+                ) {
+                    expanded = false
+                    onSelect(unit)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RepeatOption(text: String, checked: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(text, fontWeight = if (checked) FontWeight.SemiBold else null) },
+        trailingIcon = {
+            if (checked) Icon(Icons.Default.Check, contentDescription = "선택됨", modifier = Modifier.size(18.dp))
+        },
+        onClick = onClick,
+    )
+}
+
+/**
+ * 반복을 골랐을 때 저장하면 무엇이 일어나는지. 오늘·지난 날·앞날에 따라 달라서 미리 알려준다.
+ * 지난 날이면 몇 건이 한꺼번에 들어가는지까지 센다. 1월 1일 시작 매주로 저장했다가 40건이 쏟아지면 놀란다.
+ */
+@Composable
+private fun RepeatHint(state: EntryUiState) {
+    val unit = state.repeatUnit ?: return
+    val today = LocalDate.now()
+    val text = when {
+        state.isEditingRecurring -> "바꾼 내용은 다음 날짜부터 들어갑니다. 이미 들어간 내역은 바뀌지 않습니다."
+        state.date.isAfter(today) -> "${state.date.formatFull()}부터 ${unit.describe(state.repeatAnchor)}에 자동으로 들어갑니다."
+        else -> {
+            val count = generateSequence(state.date) { unit.occurrenceAfter(it, state.repeatAnchor) }
+                .takeWhile { !it.isAfter(today) }
+                .count()
+            if (count <= 1) {
+                "저장하면 이번 것이 바로 들어가고, 다음부터 자동으로 들어갑니다."
+            } else {
+                "저장하면 ${state.date.formatFull()}부터 오늘까지 밀린 ${count}건이 한꺼번에 들어갑니다."
+            }
+        }
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+    )
+}
+
+/** 고정 지출이 넣은 내역을 고칠 때. 이 줄만 바뀐다는 것과, 앞으로의 것을 바꾸는 길을 같이 보여준다. */
+@Composable
+private fun RecurringNotice(label: String, onOpen: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp, end = 8.dp, top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Default.Autorenew,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = "$label 고정 지출로 들어간 내역입니다. 여기서 고치면 이 내역만 바뀝니다.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onOpen) { Text("고정 지출") }
+    }
 }
 
 /** 카드 안쪽 구분선. 라벨 시작점에 맞춰 들여써서 카드 테두리까지 닿지 않게 한다. */

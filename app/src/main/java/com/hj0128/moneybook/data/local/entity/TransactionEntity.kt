@@ -37,6 +37,13 @@ import com.hj0128.moneybook.data.model.TransactionType
             childColumns = ["to_account_id"],
             onDelete = ForeignKey.CASCADE,
         ),
+        ForeignKey(
+            entity = RecurringEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["recurring_id"],
+            // 고정 지출을 그만둬도 이미 들어간 내역은 실제로 나간 돈이라 남긴다.
+            onDelete = ForeignKey.SET_NULL,
+        ),
     ],
     indices = [
         Index("date_epoch_day"),
@@ -44,6 +51,7 @@ import com.hj0128.moneybook.data.model.TransactionType
         Index("account_id"),
         Index("to_account_id"),
         Index("split_group_id"),
+        Index("recurring_id"),
     ],
 )
 data class TransactionEntity(
@@ -78,4 +86,11 @@ data class TransactionEntity(
      */
     @ColumnInfo(name = "split_group_id")
     val splitGroupId: Long? = null,
+    /**
+     * 고정 지출이 자동으로 넣은 내역이면 그 고정 지출 id. 손으로 넣은 내역은 null.
+     *
+     * 목록에서 저절로 생긴 줄을 알아보게 하고, 고칠 때 "이 달 것만 바뀐다"고 알려주는 데 쓴다.
+     */
+    @ColumnInfo(name = "recurring_id")
+    val recurringId: Long? = null,
 )

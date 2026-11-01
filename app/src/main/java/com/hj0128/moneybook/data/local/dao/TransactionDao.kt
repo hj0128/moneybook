@@ -35,7 +35,8 @@ interface TransactionDao {
                c.color_argb AS category_color,
                a.name AS account_name,
                ta.name AS to_account_name,
-               t.split_group_id AS split_group_id
+               t.split_group_id AS split_group_id,
+               t.recurring_id AS recurring_id
         FROM transactions AS t
         LEFT JOIN categories AS c ON c.id = t.category_id
         LEFT JOIN accounts AS a ON a.id = t.account_id
@@ -145,7 +146,8 @@ interface TransactionDao {
                c.color_argb AS category_color,
                a.name AS account_name,
                ta.name AS to_account_name,
-               t.split_group_id AS split_group_id
+               t.split_group_id AS split_group_id,
+               t.recurring_id AS recurring_id
         FROM transactions AS t
         LEFT JOIN categories AS c ON c.id = t.category_id
         LEFT JOIN accounts AS a ON a.id = t.account_id
@@ -197,7 +199,8 @@ interface TransactionDao {
                NULL AS category_color,
                a.name AS account_name,
                ta.name AS to_account_name,
-               t.split_group_id AS split_group_id
+               t.split_group_id AS split_group_id,
+               t.recurring_id AS recurring_id
         FROM transactions AS t
         LEFT JOIN accounts AS a ON a.id = t.account_id
         LEFT JOIN accounts AS ta ON ta.id = t.to_account_id
@@ -255,7 +258,8 @@ interface TransactionDao {
                c.color_argb AS category_color,
                a.name AS account_name,
                ta.name AS to_account_name,
-               t.split_group_id AS split_group_id
+               t.split_group_id AS split_group_id,
+               t.recurring_id AS recurring_id
         FROM transactions AS t
         LEFT JOIN categories AS c ON c.id = t.category_id
         LEFT JOIN accounts AS a ON a.id = t.account_id
@@ -316,7 +320,8 @@ interface TransactionDao {
                ta.name AS to_account_name,
                t.merchant AS merchant,
                t.memo AS memo,
-               t.split_group_id AS split_group_id
+               t.split_group_id AS split_group_id,
+               t.recurring_id AS recurring_id
         FROM transactions AS t
         LEFT JOIN categories AS c ON c.id = t.category_id
         LEFT JOIN categories AS p ON p.id = c.parent_id

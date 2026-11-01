@@ -3,6 +3,7 @@ package com.hj0128.moneybook.data.local
 import androidx.room.TypeConverter
 import com.hj0128.moneybook.data.model.AccountType
 import com.hj0128.moneybook.data.model.PeriodUnit
+import com.hj0128.moneybook.data.model.RepeatUnit
 import com.hj0128.moneybook.data.model.TransactionType
 
 /**
@@ -28,4 +29,10 @@ class Converters {
 
     @TypeConverter
     fun fromPeriodUnit(value: PeriodUnit?): String? = value?.name
+
+    @TypeConverter
+    fun toRepeatUnit(value: String): RepeatUnit = RepeatUnit.valueOf(value)
+
+    @TypeConverter
+    fun fromRepeatUnit(value: RepeatUnit): String = value.name
 }

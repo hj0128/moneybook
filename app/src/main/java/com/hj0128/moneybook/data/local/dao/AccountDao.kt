@@ -70,11 +70,18 @@ interface AccountDao {
     @Query("SELECT COUNT(*) FROM accounts WHERE name = :name AND id != :excludeId")
     suspend fun countSameName(name: String, excludeId: Long): Int
 
-    /** 이 자산이 쓰인 거래 수. 이체는 출금/입금 어느 쪽이든 걸린다. */
+    /**
+     * 이 자산이 쓰인 거래 수. 이체는 출금/입금 어느 쪽이든 걸린다.
+     *
+     * 고정 지출도 센다. 아직 한 번도 들어가지 않은 고정 지출만 걸린 자산을 "쓰인 적 없음"으로 보고
+     * 그냥 지우면, 외래키 CASCADE 로 고정 지출이 말없이 사라진다.
+     */
     @Query(
         """
-        SELECT COUNT(*) FROM transactions
-        WHERE account_id = :accountId OR to_account_id = :accountId
+        SELECT (SELECT COUNT(*) FROM transactions
+                WHERE account_id = :accountId OR to_account_id = :accountId)
+             + (SELECT COUNT(*) FROM recurring
+                WHERE account_id = :accountId OR to_account_id = :accountId)
         """
     )
     suspend fun countUsage(accountId: Long): Int
@@ -105,8 +112,25 @@ interface AccountDao {
     )
     suspend fun deleteSelfTransfersAfterMove(fromId: Long, toId: Long)
 
+    /** 옮기면 출금과 입금이 같아지는 고정 이체. 내역과 같은 이유로 남겨 둘 수 없다. */
+    @Query(
+        """
+        DELETE FROM recurring
+        WHERE type = 'TRANSFER'
+          AND ((account_id = :fromId AND to_account_id = :toId)
+            OR (account_id = :toId AND to_account_id = :fromId))
+        """
+    )
+    suspend fun deleteSelfRecurringAfterMove(fromId: Long, toId: Long)
+
     @Query("UPDATE transactions SET account_id = :toId WHERE account_id = :fromId")
     suspend fun reassignOutgoing(fromId: Long, toId: Long)
+
+    @Query("UPDATE recurring SET account_id = :toId WHERE account_id = :fromId")
+    suspend fun reassignRecurringOutgoing(fromId: Long, toId: Long)
+
+    @Query("UPDATE recurring SET to_account_id = :toId WHERE to_account_id = :fromId")
+    suspend fun reassignRecurringIncoming(fromId: Long, toId: Long)
 
     @Query("UPDATE transactions SET to_account_id = :toId WHERE to_account_id = :fromId")
     suspend fun reassignIncoming(fromId: Long, toId: Long)
@@ -137,6 +161,9 @@ interface AccountDao {
         deleteSelfTransfersAfterMove(accountId, toId)
         reassignOutgoing(accountId, toId)
         reassignIncoming(accountId, toId)
+        deleteSelfRecurringAfterMove(accountId, toId)
+        reassignRecurringOutgoing(accountId, toId)
+        reassignRecurringIncoming(accountId, toId)
         deleteById(accountId)
     }
 

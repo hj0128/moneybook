@@ -45,6 +45,7 @@ fun LedgerScreen(
     onManageCategories: () -> Unit,
     onManageAccounts: () -> Unit,
     onOpenBackup: () -> Unit,
+    onOpenRecurring: () -> Unit,
     onOpenTransaction: (Long) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LedgerViewModel = viewModel(
@@ -78,6 +79,7 @@ fun LedgerScreen(
                         onManageCategories = onManageCategories,
                         onManageAccounts = onManageAccounts,
                         onOpenBackup = onOpenBackup,
+                        onOpenRecurring = onOpenRecurring,
                     )
                 },
             )
@@ -146,6 +148,7 @@ private fun OverflowMenu(
     onManageCategories: () -> Unit,
     onManageAccounts: () -> Unit,
     onOpenBackup: () -> Unit,
+    onOpenRecurring: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -168,6 +171,13 @@ private fun OverflowMenu(
             onClick = {
                 expanded = false
                 onManageAccounts()
+            },
+        )
+        DropdownMenuItem(
+            text = { Text("고정 지출") },
+            onClick = {
+                expanded = false
+                onOpenRecurring()
             },
         )
         DropdownMenuItem(

@@ -26,6 +26,9 @@ data class TransactionDetail(
     /** 나눈 결제의 묶음 번호. 나누지 않았으면 null. */
     @ColumnInfo(name = "split_group_id")
     val splitGroupId: Long? = null,
+    /** 고정 지출이 자동으로 넣은 내역이면 그 고정 지출 id. */
+    @ColumnInfo(name = "recurring_id")
+    val recurringId: Long? = null,
 ) {
     val date: LocalDate get() = LocalDate.ofEpochDay(dateEpochDay)
 

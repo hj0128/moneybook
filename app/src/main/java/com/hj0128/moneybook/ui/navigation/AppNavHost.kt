@@ -18,6 +18,7 @@ import com.hj0128.moneybook.ui.entry.EntryScreen
 import com.hj0128.moneybook.ui.ledger.CategoryDetailScreen
 import com.hj0128.moneybook.ui.ledger.DetailSource
 import com.hj0128.moneybook.ui.ledger.LedgerScreen
+import com.hj0128.moneybook.ui.recurring.RecurringScreen
 import java.time.YearMonth
 
 object Routes {
@@ -31,6 +32,15 @@ object Routes {
     const val CATEGORY_MANAGER = "categories"
     const val ACCOUNT_MANAGER = "accounts"
     const val BACKUP = "backup"
+    const val RECURRING = "recurring"
+
+    /** 고정 지출 추가. 입력 화면을 반복을 켠 채로 연다. */
+    const val RECURRING_NEW = "recurring/new"
+
+    /** 고정 지출 수정. 입력 화면에 그 고정 지출을 채워서 연다. */
+    const val RECURRING_EDIT = "recurring/edit/{recurringId}"
+
+    fun recurringEdit(recurringId: Long): String = "recurring/edit/$recurringId"
 
     /**
      * 카테고리 상세. 보고 있던 기간을 같이 넘긴다.
@@ -92,6 +102,7 @@ fun AppNavHost(
                 onManageCategories = { navController.navigate(Routes.CATEGORY_MANAGER) },
                 onManageAccounts = { navController.navigate(Routes.ACCOUNT_MANAGER) },
                 onOpenBackup = { navController.navigate(Routes.BACKUP) },
+                onOpenRecurring = { navController.navigate(Routes.RECURRING) },
                 onOpenTransaction = { navController.navigate(Routes.entryEdit(it)) },
             )
         }
@@ -103,6 +114,7 @@ fun AppNavHost(
                 onClose = { navController.popBackStack() },
                 onSaved = { navController.popBackStack() },
                 editingId = backStackEntry.arguments?.getLong("transactionId"),
+                onOpenRecurring = { navController.navigate(Routes.recurringEdit(it)) },
             )
         }
         composable(Routes.CATEGORY_MANAGER) {
@@ -113,6 +125,30 @@ fun AppNavHost(
         }
         composable(Routes.BACKUP) {
             BackupScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.RECURRING) {
+            RecurringScreen(
+                onBack = { navController.popBackStack() },
+                onAdd = { navController.navigate(Routes.RECURRING_NEW) },
+                onOpen = { navController.navigate(Routes.recurringEdit(it)) },
+            )
+        }
+        composable(Routes.RECURRING_NEW) {
+            EntryScreen(
+                onClose = { navController.popBackStack() },
+                onSaved = { navController.popBackStack() },
+                startRepeating = true,
+            )
+        }
+        composable(
+            route = Routes.RECURRING_EDIT,
+            arguments = listOf(navArgument("recurringId") { type = NavType.LongType }),
+        ) { backStackEntry ->
+            EntryScreen(
+                onClose = { navController.popBackStack() },
+                onSaved = { navController.popBackStack() },
+                recurringId = backStackEntry.arguments?.getLong("recurringId"),
+            )
         }
         composable(Routes.ENTRY) {
             EntryScreen(

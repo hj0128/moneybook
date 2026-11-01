@@ -9,9 +9,11 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.hj0128.moneybook.data.local.dao.AccountDao
 import com.hj0128.moneybook.data.local.dao.CategoryDao
+import com.hj0128.moneybook.data.local.dao.RecurringDao
 import com.hj0128.moneybook.data.local.dao.TransactionDao
 import com.hj0128.moneybook.data.local.entity.AccountEntity
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
+import com.hj0128.moneybook.data.local.entity.RecurringEntity
 import com.hj0128.moneybook.data.local.entity.TransactionEntity
 
 @Database(
@@ -19,6 +21,7 @@ import com.hj0128.moneybook.data.local.entity.TransactionEntity
         TransactionEntity::class,
         CategoryEntity::class,
         AccountEntity::class,
+        RecurringEntity::class,
     ],
     version = AppDatabase.VERSION,
     exportSchema = true,
@@ -29,12 +32,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao
     abstract fun categoryDao(): CategoryDao
     abstract fun accountDao(): AccountDao
+    abstract fun recurringDao(): RecurringDao
 
     companion object {
         const val DB_NAME = "household.db"
 
         /** 백업을 복원할 때 이보다 새 버전에서 만든 파일은 받지 않는다(내려가는 마이그레이션이 없다). */
-        const val VERSION = 6
+        const val VERSION = 7
 
         @Volatile
         private var instance: AppDatabase? = null
@@ -46,7 +50,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 // 외래키 제약을 실제로 켜준다(Room 은 기본으로 켜지 않는다).
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -138,6 +142,38 @@ internal val MIGRATION_5_6 = object : Migration(5, 6) {
         db.execSQL("ALTER TABLE transactions ADD COLUMN split_group_id INTEGER")
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS index_transactions_split_group_id ON transactions(split_group_id)"
+        )
+    }
+}
+
+/**
+ * v7: 고정 지출. 매주·매월·매년 정한 날에 내역을 자동으로 넣는다.
+ *
+ * 새 표 하나와, 자동으로 들어간 내역이 어느 고정 지출에서 왔는지 적을 칸을 더한다.
+ * 기존 내역은 null 이라 손으로 넣은 내역으로 남는다. 표 만드는 SQL 은 Room 이 내보낸 스키마와 같아야 한다.
+ */
+internal val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `recurring` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `amount` INTEGER NOT NULL, " +
+                "`type` TEXT NOT NULL, `category_id` INTEGER, `account_id` INTEGER NOT NULL, " +
+                "`to_account_id` INTEGER, `merchant` TEXT NOT NULL, `memo` TEXT NOT NULL, " +
+                "`repeat_unit` TEXT NOT NULL, `anchor_epoch_day` INTEGER NOT NULL, `next_epoch_day` INTEGER NOT NULL, " +
+                "`created_at` INTEGER NOT NULL, " +
+                "FOREIGN KEY(`category_id`) REFERENCES `categories`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL , " +
+                "FOREIGN KEY(`account_id`) REFERENCES `accounts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , " +
+                "FOREIGN KEY(`to_account_id`) REFERENCES `accounts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recurring_category_id` ON `recurring` (`category_id`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recurring_account_id` ON `recurring` (`account_id`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_recurring_to_account_id` ON `recurring` (`to_account_id`)")
+        db.execSQL(
+            "ALTER TABLE transactions ADD COLUMN recurring_id INTEGER " +
+                "REFERENCES recurring(id) ON DELETE SET NULL"
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_transactions_recurring_id ON transactions(recurring_id)"
         )
     }
 }
