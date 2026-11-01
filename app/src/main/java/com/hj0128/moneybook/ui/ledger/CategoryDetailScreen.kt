@@ -93,6 +93,7 @@ fun CategoryDetailScreen(
      */
     var pickedChildId by rememberSaveable { mutableStateOf<Long?>(null) }
     val selectedChild = state.childTotals.firstOrNull { it.categoryId == pickedChildId }
+    val visibleGroups = remember(state, selectedChild) { state.groupsOf(selectedChild?.categoryId) }
     var showAssignSheet by remember { mutableStateOf(false) }
 
     // 선택 모드에서 뒤로가기는 화면을 나가는 대신 선택을 푼다.
@@ -137,7 +138,11 @@ fun CategoryDetailScreen(
                 },
                 actions = {
                     if (inSelectionMode) {
-                        TextButton(onClick = viewModel::selectAll) { Text("전체") }
+                        TextButton(
+                            onClick = {
+                                viewModel.selectAll(visibleGroups.flatMap { group -> group.items.map { it.id } })
+                            },
+                        ) { Text("전체") }
                         TextButton(
                             onClick = { showAssignSheet = true },
                             enabled = selectedIds.isNotEmpty(),
@@ -191,7 +196,7 @@ fun CategoryDetailScreen(
                             )
                         }
                     }
-                    state.groups.forEach { group ->
+                    visibleGroups.forEach { group ->
                         item(key = "header-${group.date}") {
                             DayHeader(group)
                         }
@@ -388,15 +393,15 @@ private fun ChildBreakdown(
     selectedId: Long?,
     onSelect: (Long) -> Unit,
 ) {
-    // 추이가 있을 때만 고를 수 있다. 한 달짜리 화면에서 눌러도 바뀌는 게 없으면 고장처럼 보인다.
-    val selectable = state.showsTrend && state.breakdownFiltersTrend
+    // 고르면 아래 내역이 그 줄로 좁혀지고, 한 해를 볼 때는 추이 막대도 함께 바뀐다.
+    val selectable = state.breakdownFiltersTrend
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
         Text(
-            text = if (selectable) "${state.breakdownLabel} · 눌러서 추이 보기" else state.breakdownLabel,
+            text = if (selectable) "${state.breakdownLabel} · 눌러서 골라 보기" else state.breakdownLabel,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 8.dp),

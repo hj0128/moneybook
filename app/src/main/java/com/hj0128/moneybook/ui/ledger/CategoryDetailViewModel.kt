@@ -61,7 +61,7 @@ data class CategoryDetailUiState(
     val childTotals: List<CategoryTotal> = emptyList(),
     val breakdownLabel: String = "소분류",
     /**
-     * 소계 줄을 눌러 추이를 그 줄로 좁힐 수 있는지.
+     * 소계 줄을 눌러 추이와 내역을 그 줄로 좁힐 수 있는지.
      *
      * 결제수단의 카테고리 소계는 소분류를 대분류로 합친 줄이라, 내역의 category_id(소분류일 수 있음)
      * 와 바로 맞대 볼 수 없다. 맞지 않는 막대를 보여주느니 고를 수 없게 둔다.
@@ -140,6 +140,20 @@ data class CategoryDetailUiState(
             .groupBy { it.date.monthValue }
             .mapValues { (_, items) -> items.sumOf { it.amount } }
         return (1..12).map { byMonth[it] ?: 0L }
+    }
+
+    /**
+     * 아래 내역 목록. [childId] 를 주면 그 소분류(또는 대분류에 직접 붙은 건)만.
+     *
+     * 추이 막대와 같은 조건으로 거른다. 막대는 외식인데 목록에 마트가 섞이면 무엇을 보는지 흐려진다.
+     * 날짜별 소계도 걸러진 내역으로 다시 낸다.
+     */
+    fun groupsOf(childId: Long?): List<DayGroup> {
+        if (childId == null) return groups
+        return groups
+            .flatMap { it.items }
+            .filter { it.categoryId == childId }
+            .toDayGroups()
     }
 
     /** 아직 오지 않은 달. 0원과 구분해서 흐리게 그린다. "안 썼다"와 "아직 모른다"는 다르다. */
@@ -260,8 +274,9 @@ class CategoryDetailViewModel(
         _selectedIds.value = emptySet()
     }
 
-    fun selectAll() {
-        _selectedIds.value = state.value.groups.flatMap { group -> group.items.map { it.id } }.toSet()
+    /** 화면에 보이는 내역만 고른다. 소분류로 좁혀 둔 채 "전체"를 눌러 안 보이는 것까지 옮기면 안 된다. */
+    fun selectAll(visibleIds: Collection<Long>) {
+        _selectedIds.value = visibleIds.toSet()
     }
 
     /** 고른 내역을 한 카테고리로 옮긴다. 옮기고 나면 선택 모드를 끝낸다. */
