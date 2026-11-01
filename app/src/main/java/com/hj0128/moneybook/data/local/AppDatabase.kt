@@ -8,10 +8,12 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.hj0128.moneybook.data.local.dao.AccountDao
+import com.hj0128.moneybook.data.local.dao.BudgetDao
 import com.hj0128.moneybook.data.local.dao.CategoryDao
 import com.hj0128.moneybook.data.local.dao.RecurringDao
 import com.hj0128.moneybook.data.local.dao.TransactionDao
 import com.hj0128.moneybook.data.local.entity.AccountEntity
+import com.hj0128.moneybook.data.local.entity.BudgetEntity
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.local.entity.RecurringEntity
 import com.hj0128.moneybook.data.local.entity.TransactionEntity
@@ -22,6 +24,7 @@ import com.hj0128.moneybook.data.local.entity.TransactionEntity
         CategoryEntity::class,
         AccountEntity::class,
         RecurringEntity::class,
+        BudgetEntity::class,
     ],
     version = AppDatabase.VERSION,
     exportSchema = true,
@@ -33,12 +36,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun categoryDao(): CategoryDao
     abstract fun accountDao(): AccountDao
     abstract fun recurringDao(): RecurringDao
+    abstract fun budgetDao(): BudgetDao
 
     companion object {
         const val DB_NAME = "household.db"
 
         /** 백업을 복원할 때 이보다 새 버전에서 만든 파일은 받지 않는다(내려가는 마이그레이션이 없다). */
-        const val VERSION = 7
+        const val VERSION = 8
 
         @Volatile
         private var instance: AppDatabase? = null
@@ -50,7 +54,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 // 외래키 제약을 실제로 켜준다(Room 은 기본으로 켜지 않는다).
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -177,3 +181,19 @@ internal val MIGRATION_6_7 = object : Migration(6, 7) {
         )
     }
 }
+
+/**
+ * v8: 카테고리 예산. "이 카테고리는 이 달부터 얼마"를 적는 표를 더한다.
+ *
+ * 새 표라 기존 데이터는 손댈 것이 없다. 표 만드는 SQL 은 Room 이 내보낸 스키마와 같아야 한다.
+ */
+internal val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(BUDGETS_CREATE_SQL)
+    }
+}
+
+internal const val BUDGETS_CREATE_SQL = "CREATE TABLE IF NOT EXISTS `budgets` (" +
+    "`category_id` INTEGER NOT NULL, `year_month` INTEGER NOT NULL, `amount` INTEGER, " +
+    "PRIMARY KEY(`category_id`, `year_month`), " +
+    "FOREIGN KEY(`category_id`) REFERENCES `categories`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"

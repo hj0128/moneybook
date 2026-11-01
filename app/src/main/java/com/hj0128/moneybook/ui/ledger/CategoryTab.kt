@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -54,6 +56,7 @@ import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.UncategorizedTotal
+import com.hj0128.moneybook.ui.common.UsageGauge
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatWon
 import androidx.compose.ui.graphics.Color
@@ -74,6 +77,7 @@ fun CategoryTab(
     onOpenCategory: (categoryId: Long) -> Unit,
     onOpenUncategorized: () -> Unit,
     onOpenAccount: (accountId: Long) -> Unit,
+    onOpenBudget: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.categoryState.collectAsStateWithLifecycle()
@@ -164,11 +168,17 @@ fun CategoryTab(
             EmptyPlaceholder("${state.period.thisLabel}에는 ${state.type.label} 내역이 없습니다.")
         } else {
             LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 88.dp)) {
+                if (state.showsBudget) {
+                    item(key = "budget") {
+                        BudgetCard(state = state, onClick = onOpenBudget)
+                    }
+                }
                 items(state.totals, key = { "${state.basis}-${it.categoryId}" }) { item ->
                     CategoryRow(
                         item = item,
                         ratio = state.ratioOf(item),
                         limit = state.limitOf(item),
+                        budget = state.budgetOf(item),
                         onClick = {
                             when (state.basis) {
                                 BreakdownBasis.CATEGORY -> onOpenCategory(item.categoryId)
@@ -352,7 +362,7 @@ private fun LimitNote(account: AccountBalance) {
     val limit = account.limitAmount ?: return
     val over = account.limitRemaining < 0
     val text = if (over) {
-        "${account.limitPeriodLabel} ${(-account.limitRemaining).formatWon()} 초과 / ${limit.formatWon()}"
+        "${account.limitPeriodLabel} 초과 ${(-account.limitRemaining).formatWon()} / ${limit.formatWon()}"
     } else {
         "${account.limitPeriodLabel} 남은 ${account.limitRemaining.formatWon()} / ${limit.formatWon()}"
     }
@@ -365,12 +375,62 @@ private fun LimitNote(account: AccountBalance) {
     )
 }
 
+/**
+ * 이 달 예산 전체. 누르면 예산 화면으로 간다(예산을 고치는 곳).
+ *
+ * 예산을 정한 카테고리만 더한다. 줄마다 적힌 남은 금액을 다 더해 보지 않아도 되게.
+ */
+@Composable
+private fun BudgetCard(state: CategoryUiState, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(CardDefaults.shape)
+            .clickable(onClickLabel = "예산 보기", onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        UsageGauge(
+            periodLabel = "${state.period.shortLabel} 예산",
+            used = state.budgetSpent,
+            limit = state.budgetTotal,
+            color = MaterialTheme.colorScheme.primary,
+            accessibilityName = "${state.period.shortLabel} 예산",
+            // 카드 바탕과 막대 바탕이 같은 색이면 막대 길이를 가늠할 수 없다.
+            trackColor = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.padding(16.dp),
+        )
+    }
+}
+
+/**
+ * 예산 있는 카테고리 줄 아래의 한 줄. "예산 남은 80,000원 / 500,000원".
+ * 결제수단 한도 줄과 같은 모양이다. 넘겼을 때만 지출 색으로 눈에 띄게 한다.
+ */
+@Composable
+private fun BudgetNote(spent: Long, budget: Long) {
+    val remaining = budget - spent
+    val over = remaining < 0
+    val text = if (over) {
+        "예산 초과 ${(-remaining).formatWon()} / ${budget.formatWon()}"
+    } else {
+        "예산 남은 ${remaining.formatWon()} / ${budget.formatWon()}"
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (over) LocalLedgerColors.current.expense else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 20.dp, top = 2.dp),
+    )
+}
+
 @Composable
 private fun CategoryRow(
     item: CategoryTotal,
     ratio: Float,
     onClick: () -> Unit,
     limit: AccountBalance? = null,
+    budget: Long? = null,
 ) {
     val color = Color(item.colorArgb)
     Column(
@@ -418,6 +478,7 @@ private fun CategoryRow(
             )
         }
         limit?.let { LimitNote(it) }
+        budget?.let { BudgetNote(spent = item.total, budget = it) }
         Spacer(Modifier.height(6.dp))
         // 비중 막대는 카테고리 색을 그대로 쓴다. 목록의 색 점과 같은 색이라 눈으로 잇기 쉽다.
         Box(

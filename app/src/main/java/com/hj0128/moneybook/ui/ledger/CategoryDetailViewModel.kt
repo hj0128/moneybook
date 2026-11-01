@@ -81,7 +81,12 @@ data class CategoryDetailUiState(
     val breakdownFiltersTrend: Boolean = true,
     /** 결제수단 상세일 때 그 자산. 한도 막대를 그리는 데 쓴다. */
     val account: AccountBalance? = null,
+    /** 대분류 지출 카테고리의 한 달 예산. 한 달을 볼 때만 막대를 그린다. */
+    val budget: Long? = null,
 ) {
+    /** 예산 막대에 쓸 금액. 한 해를 보면 한 달 예산과 비교할 수 없어 없다고 답한다. */
+    val monthBudget: Long? get() = budget?.takeIf { period is LedgerPeriod.Month }
+
     val isEmpty: Boolean get() = groups.isEmpty()
 
     /**
@@ -252,7 +257,8 @@ class CategoryDetailViewModel(
             repository.observeCategoryTransactions(period, source.id),
             repository.observeCategory(source.id),
             repository.observeChildTotals(period, source.id),
-        ) { items, category, childTotals ->
+            repository.observeBudgetAmounts(YearMonth.from(period.start)),
+        ) { items, category, childTotals, budgets ->
             CategoryDetailUiState(
                 period = period,
                 // 카테고리가 지워지면 이름을 못 읽는다. 화면이 비지 않게 기본값을 둔다.
@@ -261,6 +267,7 @@ class CategoryDetailViewModel(
                 type = category?.type ?: TransactionType.EXPENSE,
                 groups = items.toDayGroups(),
                 childTotals = childTotals,
+                budget = category?.takeIf { it.isTopLevel }?.let { budgets[it.id] },
             )
         }
 

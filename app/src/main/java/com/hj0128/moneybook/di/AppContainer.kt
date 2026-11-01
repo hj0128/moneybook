@@ -34,6 +34,7 @@ class AppContainer(context: Context) {
             categoryDao = database.categoryDao(),
             accountDao = database.accountDao(),
             recurringDao = database.recurringDao(),
+            budgetDao = database.budgetDao(),
         )
     }
 }

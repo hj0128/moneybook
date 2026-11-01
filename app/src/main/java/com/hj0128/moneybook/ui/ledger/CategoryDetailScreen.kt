@@ -62,6 +62,7 @@ import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.common.LimitGauge
+import com.hj0128.moneybook.ui.common.UsageGauge
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatWon
 import com.hj0128.moneybook.data.model.LedgerPeriod
@@ -190,6 +191,19 @@ fun CategoryDetailScreen(
                         item(key = "limit") {
                             LimitGauge(
                                 account = account,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                    // 예산은 보고 있는 달 기준이다. 지난달로 넘기면 그 달에 예산을 지켰는지 본다.
+                    state.monthBudget?.let { budget ->
+                        item(key = "budget") {
+                            UsageGauge(
+                                periodLabel = "${state.period.shortLabel} 예산",
+                                used = state.total,
+                                limit = budget,
+                                color = state.categoryColor?.let { Color(it) } ?: MaterialTheme.colorScheme.primary,
+                                accessibilityName = state.categoryName,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                             )
                         }

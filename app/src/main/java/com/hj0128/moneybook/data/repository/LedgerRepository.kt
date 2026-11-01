@@ -1,15 +1,21 @@
 package com.hj0128.moneybook.data.repository
 
 import com.hj0128.moneybook.data.local.dao.AccountDao
+import com.hj0128.moneybook.data.local.dao.BudgetDao
 import com.hj0128.moneybook.data.local.dao.CategoryDao
 import com.hj0128.moneybook.data.local.dao.RecurringDao
 import com.hj0128.moneybook.data.local.dao.TransactionDao
 import com.hj0128.moneybook.data.local.entity.AccountEntity
+import com.hj0128.moneybook.data.local.entity.BudgetEntity
+import com.hj0128.moneybook.data.local.entity.amountsFor
+import com.hj0128.moneybook.data.local.entity.toKey
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.local.entity.RecurringEntity
 import com.hj0128.moneybook.data.local.entity.TransactionEntity
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.AccountType
+import com.hj0128.moneybook.data.model.BudgetRow
+import com.hj0128.moneybook.data.model.BudgetSummary
 import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.LedgerPeriod
@@ -25,6 +31,7 @@ import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.UncategorizedTotal
 import com.hj0128.moneybook.util.formatFull
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import java.time.LocalDate
 import java.time.YearMonth
@@ -35,6 +42,7 @@ class LedgerRepository(
     private val categoryDao: CategoryDao,
     private val accountDao: AccountDao,
     private val recurringDao: RecurringDao,
+    private val budgetDao: BudgetDao,
 ) {
 
     fun observeMonth(yearMonth: YearMonth): Flow<List<TransactionDetail>> {
@@ -198,6 +206,43 @@ class LedgerRepository(
         }
         categoryDao.update(current.copy(name = trimmed, colorArgb = colorArgb))
         return Result.success(Unit)
+    }
+
+    // ---- 예산 ----
+
+    /**
+     * 예산 화면: 대분류 지출 카테고리 전부와 그 달 예산, 그 달에 쓴 돈. 예산이 없는 카테고리도 넣는다(거기서 정하므로).
+     *
+     * 쓴 돈은 카테고리별 탭과 같은 쿼리로 센다(소분류를 대분류로 합친 것). 두 화면 숫자가 어긋나면 안 된다.
+     */
+    fun observeBudget(month: YearMonth): Flow<BudgetSummary> {
+        val period = LedgerPeriod.Month(month)
+        return combine(
+            categoryDao.observeByType(TransactionType.EXPENSE),
+            observeCategoryTotals(period, TransactionType.EXPENSE),
+            observeBudgetAmounts(month),
+        ) { categories, totals, budgets ->
+            val spentById = totals.associate { it.categoryId to it.total }
+            BudgetSummary(
+                month = month,
+                rows = categories.filter { it.isTopLevel }.map {
+                    BudgetRow(category = it, budget = budgets[it.id], spent = spentById[it.id] ?: 0L)
+                },
+            )
+        }
+    }
+
+    /** 그 달에 적용되는 카테고리별 예산(카테고리 id -> 금액). 정하지 않은 달은 그 전에 정한 금액이다. */
+    fun observeBudgetAmounts(month: YearMonth): Flow<Map<Long, Long>> =
+        budgetDao.observeAll().map { it.amountsFor(month) }
+
+    /**
+     * [month] 부터의 예산을 정한다. 0 이하나 null 이면 그 달부터 예산을 없앤다.
+     *
+     * 그 뒤 달 중 따로 정하지 않은 달은 이 금액을 이어받는다. 이미 따로 정한 달은 그대로다.
+     */
+    suspend fun setCategoryBudget(categoryId: Long, month: YearMonth, amount: Long?) {
+        budgetDao.upsert(BudgetEntity(categoryId, month.toKey(), amount?.takeIf { it > 0L }))
     }
 
     /**

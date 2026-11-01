@@ -13,6 +13,7 @@ import com.hj0128.moneybook.data.model.LedgerPeriod
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.account.AccountManagerScreen
 import com.hj0128.moneybook.ui.backup.BackupScreen
+import com.hj0128.moneybook.ui.budget.BudgetScreen
 import com.hj0128.moneybook.ui.category.CategoryManagerScreen
 import com.hj0128.moneybook.ui.entry.EntryScreen
 import com.hj0128.moneybook.ui.ledger.CategoryDetailScreen
@@ -35,6 +36,7 @@ object Routes {
     const val BACKUP = "backup"
     const val RECURRING = "recurring"
     const val SEARCH = "search"
+    const val BUDGET = "budget"
 
     /** 고정 지출 추가. 입력 화면을 반복을 켠 채로 연다. */
     const val RECURRING_NEW = "recurring/new"
@@ -106,6 +108,7 @@ fun AppNavHost(
                 onOpenBackup = { navController.navigate(Routes.BACKUP) },
                 onOpenRecurring = { navController.navigate(Routes.RECURRING) },
                 onOpenSearch = { navController.navigate(Routes.SEARCH) },
+                onOpenBudget = { navController.navigate(Routes.BUDGET) },
                 onOpenTransaction = { navController.navigate(Routes.entryEdit(it)) },
             )
         }
@@ -128,6 +131,9 @@ fun AppNavHost(
         }
         composable(Routes.BACKUP) {
             BackupScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.BUDGET) {
+            BudgetScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.SEARCH) {
             SearchScreen(

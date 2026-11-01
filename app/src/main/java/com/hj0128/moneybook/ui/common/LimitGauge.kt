@@ -38,36 +38,65 @@ fun LimitGauge(
     showName: Boolean = false,
 ) {
     val limit = account.limitAmount ?: return
-    val over = account.limitRemaining < 0
+    UsageGauge(
+        periodLabel = account.limitPeriodLabel,
+        used = account.limitUsed,
+        limit = limit,
+        color = Color(account.colorArgb),
+        name = account.name.takeIf { showName },
+        accessibilityName = account.name,
+        limitWord = "한도",
+        modifier = modifier,
+    )
+}
+
+/**
+ * 정해 둔 금액 대비 사용 막대. 결제수단 한도와 카테고리 예산이 같은 모양을 쓴다.
+ * 둘 다 "얼마 중 얼마 썼고 얼마 남았나"라서 다르게 생기면 같은 것을 두 번 읽는 법을 익혀야 한다.
+ */
+@Composable
+fun UsageGauge(
+    periodLabel: String,
+    used: Long,
+    limit: Long,
+    color: Color,
+    modifier: Modifier = Modifier,
+    name: String? = null,
+    accessibilityName: String = name.orEmpty(),
+    limitWord: String = "예산",
+    trackColor: Color = MaterialTheme.colorScheme.surfaceVariant,
+) {
+    val remaining = limit - used
+    val over = remaining < 0
     val ledgerColors = LocalLedgerColors.current
-    val barColor = if (over) ledgerColors.expense else Color(account.colorArgb)
-    val remainingText = if (over) {
-        "${(-account.limitRemaining).formatWon()} 초과"
-    } else {
-        "남은 ${account.limitRemaining.formatWon()}"
-    }
+    val barColor = if (over) ledgerColors.expense else color
+    // "남은 X원"과 같은 자리, 같은 순서로 읽히게 "초과 X원"으로 쓴다.
+    val remainingText = if (over) "초과 ${(-remaining).formatWon()}" else "남은 ${remaining.formatWon()}"
 
     Column(
         modifier = modifier.semantics(mergeDescendants = true) {
-            contentDescription = "${account.name} ${account.limitPeriodLabel} " +
-                "${account.limitUsed.formatWon()} 사용, 한도 ${limit.formatWon()}, $remainingText"
+            contentDescription = "$accessibilityName $periodLabel " +
+                "${used.formatWon()} 사용, $limitWord ${limit.formatWon()}, $remainingText"
         },
     ) {
         Row(verticalAlignment = Alignment.Bottom) {
-            if (showName) {
+            if (name != null) {
                 Text(
-                    text = "${account.name} ",
+                    text = "$name ",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                 )
             }
+            // 기간이 화면 위에 이미 적혀 있는 곳은 빈 값을 넘긴다.
+            if (periodLabel.isNotEmpty()) {
+                Text(
+                    text = "$periodLabel ",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
-                text = "${account.limitPeriodLabel} ",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = account.limitUsed.formatWon(),
+                text = used.formatWon(),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -90,9 +119,14 @@ fun LimitGauge(
                 .fillMaxWidth()
                 .height(8.dp)
                 .clip(RoundedCornerShape(4.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(trackColor),
         ) {
-            val fraction = account.limitRatio.coerceIn(0f, 1f)
+            // 예산 0원에 쓴 돈이 있으면 다 넘긴 것이다. 나눌 수 없다고 빈 막대로 두면 안 넘긴 것처럼 보인다.
+            val fraction = when {
+                limit > 0L -> (used.toDouble() / limit).toFloat().coerceIn(0f, 1f)
+                used > 0L -> 1f
+                else -> 0f
+            }
             if (fraction > 0f) {
                 Box(
                     modifier = Modifier

@@ -122,7 +122,24 @@ data class CategoryUiState(
     /** 카테고리가 빠진 거래. 0건이면 화면에 내지 않는다. */
     val uncategorized: UncategorizedTotal = UncategorizedTotal(entryCount = 0, total = 0L),
     val sortOrder: CategorySortOrder = CategorySortOrder.AMOUNT,
+    /** 대분류 지출 카테고리의 한 달 예산(카테고리 id -> 금액). 예산이 없는 카테고리는 없다. */
+    val budgets: Map<Long, Long> = emptyMap(),
 ) {
+    /**
+     * 예산을 보여줄지. 예산은 한 달 단위라 한 해를 볼 때는 비교할 것이 없고,
+     * 수입이나 결제수단으로 묶었을 때는 대분류 지출 카테고리 줄이 아니다.
+     */
+    val showsBudget: Boolean
+        get() = basis == BreakdownBasis.CATEGORY && type == TransactionType.EXPENSE &&
+            period is LedgerPeriod.Month && budgets.isNotEmpty()
+
+    fun budgetOf(item: CategoryTotal): Long? = if (showsBudget) budgets[item.categoryId] else null
+
+    val budgetTotal: Long get() = budgets.values.sum()
+
+    /** 카테고리에 쓴 돈 전부. 예산 화면 합계와 같은 셈이다(예산 없는 카테고리는 예산 0원). */
+    val budgetSpent: Long get() = totals.sumOf { it.total }
+
     /**
      * 미분류까지 더한 진짜 합계.
      *
@@ -232,7 +249,9 @@ class LedgerViewModel(
                         repository.observeCategoryTotals(period, type),
                         repository.observeUncategorizedTotal(period, type),
                         settingsRepository.categorySortOrder,
-                    ) { totals, uncategorized, sortOrder ->
+                        // 한 해를 볼 때는 예산을 쓰지 않는다. 아무 달이나 넘겨도 되지만 첫 달로 둔다.
+                        repository.observeBudgetAmounts(YearMonth.from(period.start)),
+                    ) { totals, uncategorized, sortOrder, budgets ->
                         // 미분류는 카테고리가 아니라 정리해야 할 것이므로 정렬에 끼지 않고
                         // 화면에서 늘 맨 아래에 붙는다.
                         CategoryUiState(
@@ -242,6 +261,7 @@ class LedgerViewModel(
                             totals = totals.sortedBy(sortOrder),
                             uncategorized = uncategorized,
                             sortOrder = sortOrder,
+                            budgets = budgets,
                         )
                     }
 
