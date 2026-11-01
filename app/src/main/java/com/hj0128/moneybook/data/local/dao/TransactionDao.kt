@@ -10,6 +10,7 @@ import com.hj0128.moneybook.data.local.entity.TransactionEntity
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.ExportRow
 import com.hj0128.moneybook.data.model.MonthTotal
+import com.hj0128.moneybook.data.model.SearchCandidate
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.UncategorizedTotal
@@ -307,6 +308,39 @@ interface TransactionDao {
         startEpochDay: Long,
         endEpochDay: Long,
     ): Flow<List<CategoryTotal>>
+
+    /**
+     * 검색 대상 전체. 최신순.
+     *
+     * 걸러내기는 쿼리가 아니라 화면 쪽에서 한다. 여러 단어를 모두 포함하는지, "5,000원"을 금액으로 볼지 같은
+     * 규칙을 LIKE 로 쓰면 단어 수만큼 쿼리가 달라진다. 개인 가계부는 몇 년치라도 수천 줄이라 메모리에서 충분하다.
+     */
+    @Query(
+        """
+        SELECT t.id AS id,
+               t.amount AS amount,
+               t.type AS type,
+               t.date_epoch_day AS date_epoch_day,
+               t.merchant AS merchant,
+               t.memo AS memo,
+               t.category_id AS category_id,
+               c.name AS category_name,
+               c.color_argb AS category_color,
+               a.name AS account_name,
+               ta.name AS to_account_name,
+               t.split_group_id AS split_group_id,
+               t.recurring_id AS recurring_id,
+               p.name AS parent_category_name,
+               c.parent_id AS parent_category_id
+        FROM transactions AS t
+        LEFT JOIN categories AS c ON c.id = t.category_id
+        LEFT JOIN categories AS p ON p.id = c.parent_id
+        LEFT JOIN accounts AS a ON a.id = t.account_id
+        LEFT JOIN accounts AS ta ON ta.id = t.to_account_id
+        ORDER BY t.date_epoch_day DESC, t.created_at DESC
+        """
+    )
+    fun observeSearchCandidates(): Flow<List<SearchCandidate>>
 
     /** CSV 내보내기. 오래된 것부터, 같은 날은 입력한 순서대로. */
     @Query(

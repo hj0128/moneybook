@@ -91,9 +91,13 @@ private fun SummaryItem(label: String, value: String, color: Color) {
     }
 }
 
-/** 하루치 묶음의 머리글. 일별 탭과 카테고리 상세가 같은 모양을 쓴다. */
+/**
+ * 하루치 묶음의 머리글. 일별 탭과 카테고리 상세, 검색이 같은 모양을 쓴다.
+ *
+ * 검색처럼 여러 해에 걸친 목록은 [label] 로 연도를 붙여 넘긴다.
+ */
 @Composable
-fun DayHeader(group: DayGroup) {
+fun DayHeader(group: DayGroup, label: String = group.date.formatListHeader()) {
     val ledgerColors = LocalLedgerColors.current
     Column {
         HorizontalDivider()
@@ -105,7 +109,7 @@ fun DayHeader(group: DayGroup) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = group.date.formatListHeader(),
+                text = label,
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.weight(1f),
             )

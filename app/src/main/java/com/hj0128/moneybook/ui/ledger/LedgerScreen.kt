@@ -9,6 +9,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,6 +47,7 @@ fun LedgerScreen(
     onManageAccounts: () -> Unit,
     onOpenBackup: () -> Unit,
     onOpenRecurring: () -> Unit,
+    onOpenSearch: () -> Unit,
     onOpenTransaction: (Long) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LedgerViewModel = viewModel(
@@ -75,6 +77,10 @@ fun LedgerScreen(
                     )
                 },
                 actions = {
+                    // 메뉴 안에 넣지 않는다. 자주 쓰는데 한 번 더 눌러야 하면 안 쓰게 된다.
+                    IconButton(onClick = onOpenSearch) {
+                        Icon(Icons.Default.Search, contentDescription = "검색")
+                    }
                     OverflowMenu(
                         onManageCategories = onManageCategories,
                         onManageAccounts = onManageAccounts,

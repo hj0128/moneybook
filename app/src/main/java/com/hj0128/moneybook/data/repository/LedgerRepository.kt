@@ -19,6 +19,7 @@ import com.hj0128.moneybook.data.model.toNodes
 import com.hj0128.moneybook.data.model.MonthlySummary
 import com.hj0128.moneybook.data.model.RecurringDetail
 import com.hj0128.moneybook.data.model.RepeatUnit
+import com.hj0128.moneybook.data.model.SearchCandidate
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.UncategorizedTotal
@@ -341,6 +342,9 @@ class LedgerRepository(
         transactionDao.replacePayment(replacingId, rows)
         return Result.success(Unit)
     }
+
+    /** 검색 대상 전체. 걸러내기는 검색 화면이 한다. */
+    fun observeSearchCandidates(): Flow<List<SearchCandidate>> = transactionDao.observeSearchCandidates()
 
     // ---- 고정 지출 ----
 

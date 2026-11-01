@@ -32,3 +32,14 @@ fun LocalDate.formatListHeader(): String {
 }
 
 fun LocalDate.formatFull(): String = format(fullDateFormatter)
+
+/** "10만원", "3만 5,000원", "8,000원". 금액 범위처럼 좁은 자리에 짧게 적을 때 쓴다. */
+fun Long.formatShortWon(): String {
+    val man = this / 10_000
+    val rest = this % 10_000
+    return when {
+        man == 0L -> formatWon()
+        rest == 0L -> "${man.formatAmount()}만원"
+        else -> "${man.formatAmount()}만 ${rest.formatAmount()}원"
+    }
+}
