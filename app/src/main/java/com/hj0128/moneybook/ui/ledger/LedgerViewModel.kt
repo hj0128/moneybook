@@ -70,8 +70,13 @@ data class DailyUiState(
     val filter: DailyFilter = DailyFilter.ALL,
     /** 필터 전 기준으로 그 달에 거래가 하나라도 있는지. "내역 없음"과 "걸러져서 없음"을 구분한다. */
     val hasAnyInMonth: Boolean = false,
+    /** 나눈 결제의 줄들(묶음 번호 -> 입력 순서대로). 한 줄로 합친 결제 아래에 펼쳐 보인다. */
+    val splitParts: Map<Long, List<TransactionDetail>> = emptyMap(),
 ) {
     val isEmpty: Boolean get() = groups.isEmpty()
+
+    fun partsOf(item: TransactionDetail): List<TransactionDetail> =
+        item.splitGroupId?.let { splitParts[it] }.orEmpty()
 }
 
 data class DayGroup(
@@ -188,17 +193,16 @@ class LedgerViewModel(
             settingsRepository.daySortOrder,
             _dailyFilter,
         ) { (month, items), sortOrder, filter ->
+            // 하루 머리글의 합계도 걸러진 것만으로 다시 계산되도록 묶기 전에 거른다.
+            val filtered = items.filter { filter.matches(it.type) }
             DailyUiState(
                 yearMonth = month,
                 summary = items.toSummary(),
-                // 하루 머리글의 합계도 걸러진 것만으로 다시 계산되도록 묶기 전에 거른다.
-                groups = items.filter { filter.matches(it.type) }
-                    .collapseSplits()
-                    .toDayGroups()
-                    .applySort(sortOrder),
+                groups = filtered.collapseSplits().toDayGroups().applySort(sortOrder),
                 sortOrder = sortOrder,
                 filter = filter,
                 hasAnyInMonth = items.isNotEmpty(),
+                splitParts = filtered.splitPartsByGroup(),
             )
         }.stateIn(
             scope = viewModelScope,
@@ -369,6 +373,12 @@ internal fun List<TransactionDetail>.collapseSplits(): List<TransactionDetail> {
         )
     }
 }
+
+/** 나눈 결제의 줄을 묶음 번호별로, 입력한 순서대로. */
+internal fun List<TransactionDetail>.splitPartsByGroup(): Map<Long, List<TransactionDetail>> =
+    mapNotNull { item -> item.splitGroupId?.let { it to item } }
+        .groupBy({ it.first }, { it.second })
+        .mapValues { (_, parts) -> parts.sortedBy { it.id } }
 
 /** 값이 하나면 그대로, 여럿이면 "첫 값 외 N". */
 private fun List<TransactionDetail>.summaryLabel(pick: (TransactionDetail) -> String?): String? {

@@ -139,7 +139,12 @@ fun TransactionRow(
     selectionMode: Boolean = false,
     selected: Boolean = false,
     onClick: () -> Unit = {},
+    parts: List<TransactionDetail> = emptyList(),
 ) {
+    if (parts.size > 1) {
+        SplitTransactionRow(item, parts, onLongClick, onClick)
+        return
+    }
     val ledgerColors = LocalLedgerColors.current
     val amountColor = when (item.type) {
         TransactionType.INCOME -> ledgerColors.income
@@ -220,6 +225,92 @@ fun TransactionRow(
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.SemiBold,
             color = amountColor,
+        )
+    }
+}
+
+/**
+ * 나눈 결제 한 줄. 위에는 결제 전체(거래처 · 총액), 아래에는 나눈 줄을 하나씩 펼친다.
+ *
+ * 줄마다 무엇을 샀는지(메모), 어디로 분류했는지, 얼마인지를 따로 보여준다. 메모를 쉼표로 이어 붙이면
+ * 어느 메모가 어느 카테고리 것인지 알 수 없다.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SplitTransactionRow(
+    item: TransactionDetail,
+    parts: List<TransactionDetail>,
+    onLongClick: () -> Unit,
+    onClick: () -> Unit,
+) {
+    val ledgerColors = LocalLedgerColors.current
+    val amountColor = if (item.type == TransactionType.INCOME) ledgerColors.income else ledgerColors.expense
+    val sign = if (item.type == TransactionType.INCOME) "+" else "-"
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 나눈 결제는 카테고리가 여럿이라 색 점 하나로 대표할 수 없다. 자리만 비워 제목 줄을 맞춘다.
+            Spacer(Modifier.width(22.dp))
+            Text(
+                text = item.merchant.ifBlank { "나눈 결제" },
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = "$sign${item.amount.formatWon()}",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = amountColor,
+            )
+        }
+        parts.forEach { part ->
+            Spacer(Modifier.height(4.dp))
+            SplitPartLine(part)
+        }
+    }
+}
+
+/** 나눈 줄 하나: ● 라면  편의점 | 체크/신용카드 ······ 6,000원 */
+@Composable
+private fun SplitPartLine(part: TransactionDetail) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .padding(start = 2.dp)
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(part.categoryColor?.let { Color(it) } ?: MaterialTheme.colorScheme.outline),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            // 메모가 있으면 그게 이 줄의 이름이다("라면"). 없으면 카테고리로 대신한다.
+            Text(
+                text = part.memo.ifBlank { part.categoryName ?: "미분류" },
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = part.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = part.amount.formatWon(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

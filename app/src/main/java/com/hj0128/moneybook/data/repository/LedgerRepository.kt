@@ -296,7 +296,8 @@ class LedgerRepository(
     /**
      * 나눠서 입력한 결제를 저장한다. [replacingId] 가 있으면 그 결제(묶음 전체)를 바꾼다.
      *
-     * 날짜·거래처·메모·종류는 결제 하나에 하나라 모든 줄이 같은 값을 갖는다.
+     * 날짜·거래처·종류는 결제 하나에 하나라 모든 줄이 같은 값을 갖는다. 메모는 줄마다 다르다
+     * (식비 줄에는 "라면", 생활용품 줄에는 "면봉").
      * 줄이 하나뿐이면 나누지 않은 평범한 내역으로 저장된다.
      */
     suspend fun savePayment(
@@ -305,7 +306,6 @@ class LedgerRepository(
         type: TransactionType,
         date: LocalDate,
         merchant: String,
-        memo: String,
         nowMillis: Long,
     ): Result<Unit> {
         if (parts.isEmpty()) return Result.failure(IllegalArgumentException("나눈 줄이 없습니다."))
@@ -325,7 +325,7 @@ class LedgerRepository(
                 accountId = part.accountId,
                 dateEpochDay = date.toEpochDay(),
                 merchant = merchant.trim(),
-                memo = memo.trim(),
+                memo = part.memo.trim(),
                 createdAt = createdAt,
             )
         }
@@ -451,4 +451,5 @@ data class PaymentPart(
     val amount: Long,
     val categoryId: Long,
     val accountId: Long,
+    val memo: String = "",
 )

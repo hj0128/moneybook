@@ -218,12 +218,15 @@ fun EntryScreen(
                         )
                     }
 
-                    InputRow(
-                        label = "메모",
-                        value = state.memo,
-                        onValueChange = viewModel::updateMemo,
-                        onFocused = viewModel::hideKeypad,
-                    )
+                    // 나눠서 입력 중이면 메모는 줄마다 따로 적는다.
+                    if (!state.isSplit) {
+                        InputRow(
+                            label = "메모",
+                            value = state.memo,
+                            onValueChange = viewModel::updateMemo,
+                            onFocused = viewModel::hideKeypad,
+                        )
+                    }
 
                     PickerRow(
                         label = "날짜",
@@ -288,6 +291,8 @@ fun EntryScreen(
                                 viewModel.editPartAmount(index)
                             },
                             onRemove = viewModel::removePart,
+                            onMemoChange = viewModel::updatePartMemo,
+                            onMemoFocused = viewModel::hideKeypad,
                             onAdd = { focusManager.clearFocus(); viewModel.addPart() },
                         )
                     } else {
@@ -958,6 +963,8 @@ private fun SplitSection(
     onPickAccount: (Int) -> Unit,
     onEditAmount: (Int) -> Unit,
     onRemove: (Int) -> Unit,
+    onMemoChange: (Int, String) -> Unit,
+    onMemoFocused: () -> Unit,
     onAdd: () -> Unit,
 ) {
     Row(
@@ -984,6 +991,8 @@ private fun SplitSection(
                 onPickAccount = { onPickAccount(index) },
                 onEditAmount = { onEditAmount(index) },
                 onRemove = { onRemove(index) },
+                onMemoChange = { onMemoChange(index, it) },
+                onMemoFocused = onMemoFocused,
             )
             if (index != state.parts.lastIndex) RowDivider()
         }
@@ -1005,6 +1014,8 @@ private fun SplitPartRow(
     onPickAccount: () -> Unit,
     onEditAmount: () -> Unit,
     onRemove: () -> Unit,
+    onMemoChange: (String) -> Unit,
+    onMemoFocused: () -> Unit,
 ) {
     val category = state.categoryNodes.findSelected(part.categoryId)
     val accountName = state.accounts.firstOrNull { it.id == part.accountId }?.name
@@ -1098,6 +1109,45 @@ private fun SplitPartRow(
                 tint = MaterialTheme.colorScheme.outline,
             )
         }
+        PartMemoField(
+            value = part.memo,
+            onValueChange = onMemoChange,
+            onFocused = onMemoFocused,
+        )
+    }
+}
+
+/**
+ * 나눈 줄의 메모. 같은 결제라도 줄마다 산 것이 다르다(식비 "라면", 생활용품 "면봉").
+ *
+ * 결제수단 글자와 같은 들여쓰기·크기로 두어 그 줄에 딸린 값으로 읽히게 한다.
+ */
+@Composable
+private fun PartMemoField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onFocused: () -> Unit,
+) {
+    Box(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
+        if (value.isEmpty()) {
+            Text(
+                text = "메모",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+            ),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { if (it.isFocused) onFocused() },
+        )
     }
 }
 

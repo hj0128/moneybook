@@ -140,7 +140,7 @@ class EntryViewModel(
                     type = entity.type,
                     amountText = all.sumOf { it.amount }.toString(),
                     parts = if (split) {
-                        all.map { SplitPart(it.categoryId, it.accountId, it.amount.toString()) }
+                        all.map { SplitPart(it.categoryId, it.accountId, it.amount.toString(), it.memo) }
                     } else {
                         emptyList()
                     },
@@ -250,8 +250,9 @@ class EntryViewModel(
     fun startSplit() {
         _uiState.update { state ->
             state.copy(
+                // 적어 둔 메모는 첫 줄로 옮긴다. 나누는 동안 위쪽 메모 칸은 감춰진다.
                 parts = listOf(
-                    SplitPart(state.selectedCategoryId, state.selectedAccountId),
+                    SplitPart(state.selectedCategoryId, state.selectedAccountId, memo = state.memo),
                     SplitPart(null, state.selectedAccountId),
                 ),
                 keypadTarget = 0,
@@ -287,6 +288,7 @@ class EntryViewModel(
                     keypadTarget = null,
                     selectedCategoryId = last?.categoryId ?: state.selectedCategoryId,
                     selectedAccountId = last?.accountId ?: state.selectedAccountId,
+                    memo = last?.memo ?: state.memo,
                 )
             }
         }
@@ -302,6 +304,10 @@ class EntryViewModel(
         _uiState.update { state ->
             state.copy(parts = state.parts.updated(index) { it.copy(accountId = id) }, errorMessage = null)
         }
+    }
+
+    fun updatePartMemo(index: Int, memo: String) {
+        _uiState.update { state -> state.copy(parts = state.parts.updated(index) { it.copy(memo = memo) }) }
     }
 
     /** 줄 금액을 누르면 키패드가 그 줄을 적는다. 마지막 줄은 남은 금액이라 적을 수 없다. */
@@ -423,6 +429,7 @@ class EntryViewModel(
                     amount = state.partAmount(index),
                     categoryId = requireNotNull(part.categoryId),
                     accountId = requireNotNull(part.accountId),
+                    memo = part.memo,
                 )
             }
         } else {
@@ -431,6 +438,7 @@ class EntryViewModel(
                     amount = state.amount,
                     categoryId = requireNotNull(state.selectedCategoryId),
                     accountId = requireNotNull(state.selectedAccountId),
+                    memo = state.memo,
                 )
             )
         }
@@ -441,7 +449,6 @@ class EntryViewModel(
                 type = state.type,
                 date = state.date,
                 merchant = state.merchant,
-                memo = state.memo,
                 nowMillis = System.currentTimeMillis(),
             )
                 .onSuccess { _uiState.update { it.copy(isSaved = true) } }
@@ -484,6 +491,7 @@ data class SplitPart(
     val categoryId: Long?,
     val accountId: Long?,
     val amountText: String = "",
+    val memo: String = "",
 ) {
     val amount: Long get() = amountText.toLongOrNull() ?: 0L
 }

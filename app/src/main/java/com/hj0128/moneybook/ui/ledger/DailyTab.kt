@@ -98,6 +98,7 @@ private fun FilteredList(
                     items(group.items, key = { it.id }) { item ->
                         TransactionRow(
                             item = item,
+                            parts = state.partsOf(item),
                             onLongClick = { onRequestDelete(item.id) },
                             onClick = { onOpenTransaction(item.id) },
                         )
