@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -26,12 +27,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -62,6 +63,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -81,6 +83,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
+import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
@@ -441,23 +444,11 @@ private fun AmountDisplay(state: EntryUiState, onClick: () -> Unit) {
                 .clickable(onClickLabel = "금액 입력", onClick = onClick)
                 .padding(horizontal = 20.dp, vertical = 16.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "${state.type.label} 금액",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.weight(1f))
-                // 키패드가 올라와 있으면 굳이 "누르세요" 표시를 남길 이유가 없다.
-                if (!state.keypadVisible) {
-                    Icon(
-                        imageVector = Icons.Default.Dialpad,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
+            Text(
+                text = "${state.type.label} 금액",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Spacer(Modifier.height(6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -662,26 +653,30 @@ private fun PickerSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+        // 내용은 좌우 여백 없이 넘긴다. 줄을 누르는 자리(물결)가 시트 끝까지 닿아야 줄 전체가 버튼으로 읽힌다.
+        Column(modifier = Modifier.padding(bottom = 24.dp)) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 20.dp),
             )
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
             content()
         }
     }
 }
 
 /**
- * 카테고리 선택.
+ * 카테고리 선택. 왼쪽에 대분류, 오른쪽에 그 대분류에서 고를 수 있는 것.
  *
- * 대분류를 타일로 모두 깔고, 소분류가 있는 것을 누르면 그 자리에서 소분류 타일로 바뀐다.
+ * 예전에는 대분류 타일을 눌러 소분류 타일로 들어갔다 나오는 방식이었다. 들어가야 소분류가 보이고,
+ * 다른 대분류로 가려면 ‹ 로 나왔다 다시 들어가야 했다. 두 칸으로 나누면 대분류를 바꿔 가며
+ * 소분류를 바로 훑을 수 있고, 들어갔다 나오는 단계가 없다.
  *
- * 이전에는 소분류가 있는 대분류만 머리글 + 칩이고 나머지는 칩 한 덩어리였는데,
- * 같은 대분류인데 화면에서 두 가지 모양으로 갈려 어색했다. 타일로 통일하면
- * 모든 대분류가 같은 모양이고, 더 들어갈 곳이 있는지는 › 하나로만 구분된다.
+ * 소분류가 없는 대분류는 왼쪽에서 누르면 바로 골라진다. 오른쪽에 자기 이름을 한 번 더 띄우면
+ * 대분류인지 소분류인지 헷갈린다. 펼칠 것이 있는 대분류에만 › 를 달아 누르면 무엇이 일어날지
+ * 미리 보이게 한다.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -691,224 +686,172 @@ private fun CategoryPickerSheet(
     onPick: (Long) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var openParentId by remember { mutableStateOf<Long?>(null) }
-    val openParent = nodes.firstOrNull { it.category.id == openParentId }
+    // 이미 고른 소분류가 있으면 그 대분류를 펼쳐 둔다. 다시 열었을 때 어디 있었는지 바로 보인다.
+    // 펼칠 수 있는 건 소분류가 있는 대분류뿐이다.
+    var focusedId by remember {
+        mutableStateOf(
+            nodes.firstOrNull { node -> node.hasChildren && node.children.any { it.id == selectedId } }
+                ?.category?.id
+                ?: nodes.firstOrNull { it.hasChildren }?.category?.id
+        )
+    }
+    val focused = nodes.firstOrNull { it.category.id == focusedId }
 
-    // 대분류로 돌아가는 길은 ‹ 버튼뿐이다. ModalBottomSheet 는 자체 창에서 뒤로가기를
-    // 먼저 처리해 시트 안의 BackHandler 까지 오지 않으므로, 하드웨어 뒤로가기는
-    // 시트를 통째로 닫는다(시트의 표준 동작이라 어색하지 않다).
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        Column(
-            modifier = Modifier
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
-        ) {
-            if (openParent == null) {
-                Text(
-                    text = "카테고리 선택",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(16.dp))
-                TileGrid(
-                    tiles = nodes.map { node ->
-                        PickerTile(
-                            id = node.category.id,
-                            name = node.category.name,
-                            colorArgb = node.category.colorArgb,
-                            hasChildren = node.hasChildren,
-                            // selectable 은 소분류가 있으면 소분류들, 없으면 자기 자신이다.
-                            // 그래서 이 한 줄로 두 경우가 함께 처리된다.
-                            selected = node.selectable.any { it.id == selectedId },
-                        )
-                    },
-                    onClick = { id ->
-                        val node = nodes.first { it.category.id == id }
-                        if (node.hasChildren) openParentId = id else onPick(id)
-                    },
-                )
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { openParentId = null }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                            contentDescription = "대분류로",
+        Column(modifier = Modifier.padding(bottom = 24.dp)) {
+            Text(
+                text = "카테고리 선택",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(modifier = Modifier.height(CategoryPaneHeight)) {
+                Column(
+                    modifier = Modifier
+                        .width(ParentPaneWidth)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    nodes.forEach { node ->
+                        ParentItem(
+                            node = node,
+                            focused = node.category.id == focusedId,
+                            holdsSelection = node.selectable.any { it.id == selectedId },
+                            onClick = {
+                                if (node.hasChildren) focusedId = node.category.id else onPick(node.category.id)
+                            },
                         )
                     }
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(Color(openParent.category.colorArgb)),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = openParent.category.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
                 }
-                Spacer(Modifier.height(8.dp))
-                TileGrid(
-                    tiles = openParent.children.map {
-                        PickerTile(
-                            id = it.id,
-                            name = it.name,
-                            colorArgb = it.colorArgb,
-                            selected = it.id == selectedId,
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 8.dp),
+                ) {
+                    focused?.children?.forEach { category ->
+                        CategoryOption(
+                            category = category,
+                            selected = category.id == selectedId,
+                            onClick = { onPick(category.id) },
                         )
-                    },
-                    onClick = onPick,
-                )
-            }
-        }
-    }
-}
-
-/**
- * 시트 타일 하나.
- *
- * [colorArgb] 가 null 이면 중립색으로 그린다. 자산에는 색이 없는데, 목록이나 차트
- * 어디에도 안 쓰이는 색을 여기서만 새로 부여하면 근거 없는 색이 된다.
- */
-private data class PickerTile(
-    val id: Long,
-    val name: String,
-    val colorArgb: Int? = null,
-    /** 이름 아래 작게 붙는 한 줄. 자산의 잔액처럼 고를 때 도움이 되는 값. */
-    val caption: String? = null,
-    val hasChildren: Boolean = false,
-    val enabled: Boolean = true,
-    /**
-     * 켜진 상태인지. 부르는 쪽이 정한다.
-     *
-     * 대분류 타일은 자기가 골라진 것이 아니라 "고른 소분류를 품고 있는" 경우에도 켜진다.
-     * 그렇지 않으면 소분류를 고르고 시트를 다시 열었을 때 어느 대분류 안에 있었는지 알 수 없다.
-     */
-    val selected: Boolean = false,
-)
-
-private const val TILE_COLUMNS = 3
-private const val VISIBLE_TILE_ROWS = 4
-
-/**
- * 타일 높이.
- *
- * 아이콘 없이 글자만 넣으므로 정사각형에 가깝게 키우면 가운데 글자 한 줄만 뜨고
- * 위아래가 비어 보인다. 두 줄짜리 이름이 들어갈 만큼만 두고 글자를 키우는 편이 낫다.
- */
-private val TileHeight = 68.dp
-private val TileGap = 8.dp
-
-/**
- * 타일 영역 높이. 모든 선택 시트가 이 높이를 함께 쓴다.
- *
- * 개수에 따라 커졌다 작아졌다 하면 대분류/소분류를 오갈 때도, 카테고리와 결제수단을
- * 번갈아 열 때도 시트가 튄다. 항목이 적은 시트는 아래가 비지만 그게 덜 거슬린다.
- */
-private val TileGridHeight = TileHeight * VISIBLE_TILE_ROWS + TileGap * (VISIBLE_TILE_ROWS - 1)
-
-/**
- * 타일 격자.
- *
- * LazyVerticalGrid 는 높이가 정해지지 않은 시트 안에서 높이를 못 정한다.
- * 줄 수가 많지 않으므로 직접 세 칸씩 끊고, 높이는 [TileGridHeight] 로 못 박아
- * 넘치는 만큼만 안에서 스크롤한다.
- */
-@Composable
-private fun TileGrid(
-    tiles: List<PickerTile>,
-    onClick: (Long) -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .height(TileGridHeight)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(TileGap),
-    ) {
-        tiles.chunked(TILE_COLUMNS).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(TileGap)) {
-                row.forEach { tile ->
-                    TileItem(
-                        tile = tile,
-                        onClick = { onClick(tile.id) },
-                        modifier = Modifier.weight(1f),
-                    )
+                    }
                 }
-                // 마지막 줄이 덜 찼을 때 남은 칸을 비워 타일 폭을 일정하게 유지한다.
-                repeat(TILE_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
             }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
 }
 
-@Composable
-private fun TileItem(
-    tile: PickerTile,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // 카테고리 색을 타일에 연하게 깐다. 목록과 차트가 쓰는 색과 같아서 눈으로 이어진다.
-    // 고르면 같은 색을 진하게 올려 "다른 색"이 아니라 "같은 색이 켜진 것"으로 읽히게 한다.
-    val selected = tile.selected
-    val accent = tile.colorArgb?.let { Color(it) } ?: MaterialTheme.colorScheme.primary
-    val background = when {
-        selected -> accent.copy(alpha = 0.30f)
-        tile.colorArgb != null -> accent.copy(alpha = 0.12f)
-        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-    }
-    val borderColor = when {
-        selected -> accent
-        tile.colorArgb != null -> accent.copy(alpha = 0.40f)
-        else -> MaterialTheme.colorScheme.outlineVariant
-    }
+private val CategoryPaneHeight = 420.dp
+private val ParentPaneWidth = 132.dp
 
-    Box(
-        modifier = modifier
-            .height(TileHeight)
-            .clip(MaterialTheme.shapes.medium)
-            .background(background)
-            .border(
-                width = if (selected) 2.dp else 1.dp,
-                color = borderColor,
-                shape = MaterialTheme.shapes.medium,
+/**
+ * 왼쪽 대분류 한 줄. 펼친 줄은 바탕을 오른쪽과 같은 색으로 칠해 오른쪽 칸과 이어져 보이게 한다.
+ * 고른 것(자신 또는 그 소분류)이 있으면 체크를 단다. 다른 대분류를 보는 중에도 지금 무엇을
+ * 골라 뒀는지 잃지 않는다. 펼칠 소분류가 있으면 › 를 단다.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ParentItem(
+    node: CategoryNode,
+    focused: Boolean,
+    holdsSelection: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (focused) BottomSheetDefaults.ContainerColor else Color.Transparent)
+            .clickable(
+                onClickLabel = if (node.hasChildren) "${node.category.name} 펼치기" else "${node.category.name} 선택",
+                onClick = onClick,
             )
-            .clickable(enabled = tile.enabled, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center,
+            .heightIn(min = 52.dp)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = tile.name,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (tile.enabled) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.outline,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(Color(node.category.colorArgb)),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = node.category.name,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (focused) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (holdsSelection) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "선택됨",
+                modifier = Modifier.size(16.dp),
+                tint = Color(node.category.colorArgb),
             )
-            tile.caption?.let { caption ->
-                Text(
-                    text = caption,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
         }
-        if (tile.hasChildren) {
+        if (node.hasChildren) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
+                modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.outline,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(16.dp),
+            )
+        }
+    }
+}
+
+/** 오른쪽에서 실제로 고르는 한 줄. 누르면 바로 골라지고 시트가 닫힌다. */
+@Composable
+private fun CategoryOption(
+    category: CategoryEntity,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val color = Color(category.colorArgb)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(if (selected) color.copy(alpha = 0.16f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .heightIn(min = 52.dp)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(color),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = category.name,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            modifier = Modifier.weight(1f),
+        )
+        if (selected) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "선택됨",
+                modifier = Modifier.size(20.dp),
+                tint = color,
             )
         }
     }
@@ -934,21 +877,110 @@ private fun AccountSheetContent(
         else -> state.selectedToAccountId
     }
 
-    TileGrid(
-        tiles = state.accounts.map { account ->
-            PickerTile(
-                id = account.id,
-                name = account.name,
-                colorArgb = account.colorArgb,
-                // 잔액은 이미 계산해 두고 있었다. 어느 자산으로 낼지 고를 때
-                // 가장 먼저 보고 싶은 값이라 타일에 함께 낸다.
-                caption = account.balance.formatWon(),
-                enabled = account.id != blockedId,
+    Column(
+        modifier = Modifier
+            .heightIn(max = AccountListMaxHeight)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        state.accounts.forEach { account ->
+            AccountOption(
+                account = account,
                 selected = account.id == selectedId,
+                enabled = account.id != blockedId,
+                onClick = { onPick(account.id) },
             )
-        },
-        onClick = onPick,
-    )
+        }
+    }
+}
+
+/** 자산이 많아도 시트가 화면을 다 덮지 않게. 넘치면 안에서 스크롤한다. */
+private val AccountListMaxHeight = 480.dp
+
+/**
+ * 결제수단 한 줄. [색 배지] 이름 / 종류 · 잔액 (· 한도 남은 금액) ……… ✓
+ *
+ * 고를 때 보고 싶은 값을 한 줄에 모은다. 잔액은 "이걸로 내도 되나", 한도는 복지포인트처럼
+ * "얼마 남았나"를 고르기 전에 확인하려는 것이다. 자산 관리 화면까지 가지 않아도 된다.
+ *
+ * 배지는 자산 색에 이름 첫 글자를 얹는다. 점 하나보다 커서 색으로 먼저 찾을 수 있다.
+ */
+@Composable
+private fun AccountOption(
+    account: AccountBalance,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val color = Color(account.colorArgb)
+    val ledgerColors = LocalLedgerColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(if (selected) color.copy(alpha = 0.14f) else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onClick)
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            // 이체에서 반대쪽에 이미 고른 자산은 흐리게. 숨기면 목록 순서가 달라져 찾기 어렵다.
+            .alpha(if (enabled) 1f else 0.38f),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(color),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = account.name.take(1),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = account.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // 이름이 곧 종류면("현금") 종류는 빼고 잔액만. "현금 / 현금 · 1,000원"은 군더더기다.
+            Text(
+                text = if (account.name == account.type.label) {
+                    account.balance.formatWon()
+                } else {
+                    "${account.type.label} · ${account.balance.formatWon()}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (account.hasLimit) {
+                val over = account.limitRemaining < 0
+                Text(
+                    text = if (over) {
+                        "${account.limitPeriodLabel} ${(-account.limitRemaining).formatWon()} 초과"
+                    } else {
+                        "${account.limitPeriodLabel} 남은 ${account.limitRemaining.formatWon()}"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (over) ledgerColors.expense else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (selected) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "선택됨",
+                modifier = Modifier.size(20.dp),
+                tint = color,
+            )
+        }
+    }
 }
 
 /**
