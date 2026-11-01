@@ -215,6 +215,7 @@ fun CategoryDetailScreen(
                                     }
                                 },
                             )
+                            if (item.id != group.items.last().id) TransactionDivider()
                         }
                     }
                 }

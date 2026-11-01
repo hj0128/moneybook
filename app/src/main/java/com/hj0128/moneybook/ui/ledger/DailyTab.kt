@@ -102,6 +102,7 @@ private fun FilteredList(
                             onLongClick = { onRequestDelete(item.id) },
                             onClick = { onOpenTransaction(item.id) },
                         )
+                        if (item.id != group.items.last().id) TransactionDivider()
                     }
                 }
             }

@@ -315,6 +315,23 @@ private fun SplitPartLine(part: TransactionDetail) {
     }
 }
 
+/**
+ * 같은 날 내역 사이의 구분선.
+ *
+ * 날짜 머리글의 선보다 연하고, 글자가 시작하는 자리부터 긋는다. 화면 끝까지 같은 선이면
+ * "날짜가 바뀜"과 "같은 날 다음 내역"이 구분되지 않아 하루가 여러 덩어리로 잘려 보인다.
+ * 나눈 결제처럼 줄이 여럿인 내역도 어디서 끝나는지 이 선으로 보인다.
+ * 그날 마지막 내역 아래에는 긋지 않는다. 다음 날짜 머리글이 그 역할을 한다.
+ */
+@Composable
+fun TransactionDivider() {
+    HorizontalDivider(
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+        // 16(줄 여백) + 10(색 점) + 12(간격): 제목 글자가 시작하는 자리.
+        modifier = Modifier.padding(start = 38.dp),
+    )
+}
+
 @Composable
 fun DeleteTransactionDialog(
     onConfirm: () -> Unit,
