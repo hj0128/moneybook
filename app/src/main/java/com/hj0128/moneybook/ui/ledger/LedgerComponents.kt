@@ -198,22 +198,22 @@ fun TransactionRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // 메모(무엇을 샀는지)를 카테고리·결제수단보다 위에 둔다. 나눈 결제의 줄과 같은 순서라
+            // 일별 탭에서 두 모양이 섞여도 같은 자리에 같은 값이 온다.
+            // 카테고리·결제수단과 한 줄에 잇지 않는 건 메모 길이를 가늠할 수 없어서다.
+            if (item.memo.isNotBlank()) {
+                Text(
+                    text = item.memo,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             if (item.subtitle.isNotBlank()) {
                 Text(
                     text = item.subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            // 메모는 자유 서술이라 길이를 가늠할 수 없다. 카테고리·결제수단과 한 줄에 이으면
-            // 메모가 길 때 앞의 두 값이 잘려 나가므로 아래 줄로 내린다.
-            if (item.memo.isNotBlank()) {
-                Text(
-                    text = item.memo,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.outline,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
