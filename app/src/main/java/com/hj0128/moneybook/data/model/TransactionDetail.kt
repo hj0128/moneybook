@@ -23,6 +23,9 @@ data class TransactionDetail(
     val accountName: String?,
     @ColumnInfo(name = "to_account_name")
     val toAccountName: String?,
+    /** 나눈 결제의 묶음 번호. 나누지 않았으면 null. */
+    @ColumnInfo(name = "split_group_id")
+    val splitGroupId: Long? = null,
 ) {
     val date: LocalDate get() = LocalDate.ofEpochDay(dateEpochDay)
 

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.hj0128.moneybook.data.local.entity.TransactionEntity
 import com.hj0128.moneybook.data.model.CategoryTotal
@@ -32,7 +33,8 @@ interface TransactionDao {
                c.name AS category_name,
                c.color_argb AS category_color,
                a.name AS account_name,
-               ta.name AS to_account_name
+               ta.name AS to_account_name,
+               t.split_group_id AS split_group_id
         FROM transactions AS t
         LEFT JOIN categories AS c ON c.id = t.category_id
         LEFT JOIN accounts AS a ON a.id = t.account_id
@@ -141,7 +143,8 @@ interface TransactionDao {
                c.name AS category_name,
                c.color_argb AS category_color,
                a.name AS account_name,
-               ta.name AS to_account_name
+               ta.name AS to_account_name,
+               t.split_group_id AS split_group_id
         FROM transactions AS t
         LEFT JOIN categories AS c ON c.id = t.category_id
         LEFT JOIN accounts AS a ON a.id = t.account_id
@@ -192,7 +195,8 @@ interface TransactionDao {
                NULL AS category_name,
                NULL AS category_color,
                a.name AS account_name,
-               ta.name AS to_account_name
+               ta.name AS to_account_name,
+               t.split_group_id AS split_group_id
         FROM transactions AS t
         LEFT JOIN accounts AS a ON a.id = t.account_id
         LEFT JOIN accounts AS ta ON ta.id = t.to_account_id
@@ -249,7 +253,8 @@ interface TransactionDao {
                c.name AS category_name,
                c.color_argb AS category_color,
                a.name AS account_name,
-               ta.name AS to_account_name
+               ta.name AS to_account_name,
+               t.split_group_id AS split_group_id
         FROM transactions AS t
         LEFT JOIN categories AS c ON c.id = t.category_id
         LEFT JOIN accounts AS a ON a.id = t.account_id
@@ -316,4 +321,39 @@ interface TransactionDao {
 
     @Query("DELETE FROM transactions WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    /** 나눈 결제의 줄들. 입력한 순서대로. */
+    @Query("SELECT * FROM transactions WHERE split_group_id = :groupId ORDER BY id")
+    suspend fun findGroup(groupId: Long): List<TransactionEntity>
+
+    @Query("DELETE FROM transactions WHERE split_group_id = :groupId")
+    suspend fun deleteGroup(groupId: Long)
+
+    @Query("UPDATE transactions SET split_group_id = :groupId WHERE id = :id")
+    suspend fun setGroup(id: Long, groupId: Long)
+
+    /**
+     * 결제 하나를 통째로 바꾼다. [oldId] 가 있으면 그 결제(나눈 것이면 묶음 전체)를 지우고 [rows] 를 넣는다.
+     *
+     * 줄 수가 바뀌거나(2줄 -> 3줄, 나눔 <-> 한 줄) 줄마다 무엇이 바뀌었는지 맞춰 고치는 것보다
+     * 지우고 다시 넣는 편이 단순하고 틀릴 곳이 없다. 내역 id 를 붙잡고 있는 곳이 없어서 id 가 바뀌어도 된다.
+     */
+    @Transaction
+    suspend fun replacePayment(oldId: Long?, rows: List<TransactionEntity>) {
+        if (oldId != null) deletePayment(oldId)
+        if (rows.size == 1) {
+            insert(rows.single().copy(splitGroupId = null))
+            return
+        }
+        val firstId = insert(rows.first())
+        setGroup(firstId, firstId)
+        rows.drop(1).forEach { insert(it.copy(splitGroupId = firstId)) }
+    }
+
+    /** 결제 하나 삭제. 나눈 결제면 묶음 전체를 지운다. */
+    @Transaction
+    suspend fun deletePayment(id: Long) {
+        val groupId = findById(id)?.splitGroupId
+        if (groupId != null) deleteGroup(groupId) else deleteById(id)
+    }
 }

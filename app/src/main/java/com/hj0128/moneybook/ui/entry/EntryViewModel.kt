@@ -12,6 +12,7 @@ import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.flatten
 import com.hj0128.moneybook.data.repository.LedgerRepository
+import com.hj0128.moneybook.data.repository.PaymentPart
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,8 +43,29 @@ data class EntryUiState(
     /** 기존 내역을 고치는 중이면 그 id. 새로 넣는 중이면 null. */
     val editingId: Long? = null,
     val isDeleted: Boolean = false,
+    /**
+     * 나눠서 입력하는 줄들. 비어 있으면 나누지 않은 평범한 입력이다.
+     *
+     * 마지막 줄은 금액을 받지 않고 "총액 - 앞 줄들"로 채운다. 나눈 합이 총액과 어긋날 수가 없고,
+     * 둘로 나누는 가장 흔한 경우에는 한 줄만 적으면 된다.
+     */
+    val parts: List<SplitPart> = emptyList(),
+    /** 키패드가 무엇을 적는 중인지. null 이면 총액, 숫자면 그 번째 줄의 금액. */
+    val keypadTarget: Int? = null,
+    /** 고치는 내역이 이미 나눈 결제였는지. 한 줄로 되돌려도 묶음을 지우고 다시 저장해야 한다. */
+    val editingSplit: Boolean = false,
 ) {
     val isEditing: Boolean get() = editingId != null
+
+    val isSplit: Boolean get() = parts.isNotEmpty()
+
+    /** [index] 번째 줄의 금액. 마지막 줄은 남은 금액이다. */
+    fun partAmount(index: Int): Long =
+        if (index == parts.lastIndex) {
+            amount - parts.dropLast(1).sumOf { it.amount }
+        } else {
+            parts[index].amount
+        }
 
     val amount: Long get() = amountText.toLongOrNull() ?: 0L
 
@@ -60,6 +82,14 @@ data class EntryUiState(
         id?.let { accounts.firstOrNull { account -> account.id == it }?.name }
 
     val canSave: Boolean
+        get() = if (isSplit) canSaveSplit else canSaveSingle
+
+    private val canSaveSplit: Boolean
+        get() = amount > 0 &&
+            parts.indices.all { partAmount(it) > 0 } &&
+            parts.all { it.categoryId != null && it.accountId != null }
+
+    private val canSaveSingle: Boolean
         get() = amount > 0 &&
             selectedAccountId != null &&
             if (isTransfer) {
@@ -102,11 +132,19 @@ class EntryViewModel(
      */
     private fun loadForEdit(id: Long) {
         viewModelScope.launch {
-            val entity = repository.findTransaction(id) ?: return@launch
+            val all = repository.findPaymentParts(id)
+            val entity = all.firstOrNull() ?: return@launch
+            val split = all.size > 1
             _uiState.update { state ->
                 state.copy(
                     type = entity.type,
-                    amountText = entity.amount.toString(),
+                    amountText = all.sumOf { it.amount }.toString(),
+                    parts = if (split) {
+                        all.map { SplitPart(it.categoryId, it.accountId, it.amount.toString()) }
+                    } else {
+                        emptyList()
+                    },
+                    editingSplit = split,
                     date = LocalDate.ofEpochDay(entity.dateEpochDay),
                     merchant = entity.merchant,
                     memo = entity.memo,
@@ -132,10 +170,13 @@ class EntryViewModel(
             repository.observeCategoryTree(type).collect { nodes ->
                 _uiState.update { state ->
                     // 종류를 바꾸거나 고른 카테고리가 지워지면 선택은 무효다.
-                    val stillValid = nodes.flatten().any { it.id == state.selectedCategoryId }
+                    val validIds = nodes.flatten().map { it.id }.toSet()
                     state.copy(
                         categoryNodes = nodes,
-                        selectedCategoryId = if (stillValid) state.selectedCategoryId else null,
+                        selectedCategoryId = state.selectedCategoryId?.takeIf { it in validIds },
+                        parts = state.parts.map { part ->
+                            part.copy(categoryId = part.categoryId?.takeIf { it in validIds })
+                        },
                     )
                 }
             }
@@ -144,30 +185,131 @@ class EntryViewModel(
 
     fun selectType(type: TransactionType) {
         if (_uiState.value.type == type) return
-        _uiState.update { it.copy(type = type, selectedCategoryId = null, errorMessage = null) }
+        _uiState.update { state ->
+            state.copy(
+                type = type,
+                selectedCategoryId = null,
+                // 이체는 나눌 수 없다. 수입/지출을 오가면 카테고리만 다시 고르면 된다.
+                parts = if (type == TransactionType.TRANSFER) {
+                    emptyList()
+                } else {
+                    state.parts.map { it.copy(categoryId = null) }
+                },
+                keypadTarget = null,
+                errorMessage = null,
+            )
+        }
         observeCategories(type)
     }
 
     fun appendDigit(digit: Char) {
-        _uiState.update { state ->
-            val next = (state.amountText + digit).trimStart('0')
-            if (next.length > MAX_AMOUNT_DIGITS) state
-            else state.copy(amountText = next, errorMessage = null)
+        editTargetText { text ->
+            val next = (text + digit).trimStart('0')
+            if (next.length > MAX_AMOUNT_DIGITS) text else next
         }
     }
 
     /** 000, 만 같은 빠른 입력 버튼용. */
     fun appendZeros(count: Int) {
-        if (_uiState.value.amountText.isEmpty()) return
+        if (_uiState.value.targetText.isEmpty()) return
         repeat(count) { appendDigit('0') }
     }
 
     fun deleteLastDigit() {
-        _uiState.update { it.copy(amountText = it.amountText.dropLast(1), errorMessage = null) }
+        editTargetText { it.dropLast(1) }
     }
 
     fun clearAmount() {
-        _uiState.update { it.copy(amountText = "", errorMessage = null) }
+        editTargetText { "" }
+    }
+
+    /** 키패드가 가리키는 칸(총액 또는 나눈 줄 하나)의 글자를 바꾼다. */
+    private fun editTargetText(transform: (String) -> String) {
+        _uiState.update { state ->
+            val target = state.keypadTarget
+            if (target == null || target !in state.parts.indices) {
+                state.copy(amountText = transform(state.amountText), errorMessage = null)
+            } else {
+                state.copy(
+                    parts = state.parts.updated(target) { it.copy(amountText = transform(it.amountText)) },
+                    errorMessage = null,
+                )
+            }
+        }
+    }
+
+    private val EntryUiState.targetText: String
+        get() = keypadTarget?.let { parts.getOrNull(it)?.amountText } ?: amountText
+
+    // ---- 나눠서 입력 ----
+
+    /**
+     * 나누기 시작. 지금 고른 카테고리·결제수단을 첫 줄로 옮기고, 둘째 줄이 나머지를 받는다.
+     * 첫 줄 금액부터 적으면 되도록 키패드를 그 줄에 맞춰 올린다.
+     */
+    fun startSplit() {
+        _uiState.update { state ->
+            state.copy(
+                parts = listOf(
+                    SplitPart(state.selectedCategoryId, state.selectedAccountId),
+                    SplitPart(null, state.selectedAccountId),
+                ),
+                keypadTarget = 0,
+                keypadVisible = true,
+                errorMessage = null,
+            )
+        }
+    }
+
+    /** 줄 추가. 나머지를 받는 마지막 줄은 그대로 마지막에 두고 그 위에 새 줄을 끼운다. */
+    fun addPart() {
+        _uiState.update { state ->
+            val insertAt = state.parts.lastIndex.coerceAtLeast(0)
+            val account = state.parts.lastOrNull()?.accountId ?: state.selectedAccountId
+            state.copy(
+                parts = state.parts.toMutableList().apply { add(insertAt, SplitPart(null, account)) },
+                keypadTarget = insertAt,
+                keypadVisible = true,
+            )
+        }
+    }
+
+    /** 줄 삭제. 한 줄만 남으면 나누기를 끝내고 그 줄의 값으로 평범한 입력이 된다. */
+    fun removePart(index: Int) {
+        _uiState.update { state ->
+            val remaining = state.parts.filterIndexed { i, _ -> i != index }
+            if (remaining.size >= 2) {
+                state.copy(parts = remaining, keypadTarget = null)
+            } else {
+                val last = remaining.singleOrNull()
+                state.copy(
+                    parts = emptyList(),
+                    keypadTarget = null,
+                    selectedCategoryId = last?.categoryId ?: state.selectedCategoryId,
+                    selectedAccountId = last?.accountId ?: state.selectedAccountId,
+                )
+            }
+        }
+    }
+
+    fun selectPartCategory(index: Int, id: Long) {
+        _uiState.update { state ->
+            state.copy(parts = state.parts.updated(index) { it.copy(categoryId = id) }, errorMessage = null)
+        }
+    }
+
+    fun selectPartAccount(index: Int, id: Long) {
+        _uiState.update { state ->
+            state.copy(parts = state.parts.updated(index) { it.copy(accountId = id) }, errorMessage = null)
+        }
+    }
+
+    /** 줄 금액을 누르면 키패드가 그 줄을 적는다. 마지막 줄은 남은 금액이라 적을 수 없다. */
+    fun editPartAmount(index: Int) {
+        _uiState.update { state ->
+            if (index == state.parts.lastIndex) state
+            else state.copy(keypadTarget = index, keypadVisible = true)
+        }
     }
 
     fun selectCategory(id: Long) {
@@ -201,8 +343,9 @@ class EntryViewModel(
         _uiState.update { it.copy(memo = memo) }
     }
 
+    /** 총액을 눌렀을 때. */
     fun showKeypad() {
-        _uiState.update { it.copy(keypadVisible = true) }
+        _uiState.update { it.copy(keypadVisible = true, keypadTarget = null) }
     }
 
     /** 금액 말고 다른 것을 만지기 시작하면 키패드는 자리를 비켜준다. */
@@ -214,7 +357,8 @@ class EntryViewModel(
     fun delete() {
         val id = _uiState.value.editingId ?: return
         viewModelScope.launch {
-            repository.deleteTransaction(id)
+            // 이 화면은 결제 하나를 통째로 다룬다. 나눈 결제면 묶음 전체가 지워진다.
+            repository.deletePayment(id)
             _uiState.update { it.copy(isDeleted = true) }
         }
     }
@@ -226,6 +370,10 @@ class EntryViewModel(
             return
         }
         val id = state.editingId
+        if (state.isSplit || state.editingSplit) {
+            savePayment(state)
+            return
+        }
         if (id != null) {
             viewModelScope.launch {
                 repository.updateTransaction(
@@ -267,7 +415,48 @@ class EntryViewModel(
         }
     }
 
+    /** 나눈 결제 저장. 이미 나눈 결제를 한 줄로 되돌린 경우도 여기로 와서 묶음째 바꾼다. */
+    private fun savePayment(state: EntryUiState) {
+        val parts = if (state.isSplit) {
+            state.parts.mapIndexed { index, part ->
+                PaymentPart(
+                    amount = state.partAmount(index),
+                    categoryId = requireNotNull(part.categoryId),
+                    accountId = requireNotNull(part.accountId),
+                )
+            }
+        } else {
+            listOf(
+                PaymentPart(
+                    amount = state.amount,
+                    categoryId = requireNotNull(state.selectedCategoryId),
+                    accountId = requireNotNull(state.selectedAccountId),
+                )
+            )
+        }
+        viewModelScope.launch {
+            repository.savePayment(
+                replacingId = state.editingId,
+                parts = parts,
+                type = state.type,
+                date = state.date,
+                merchant = state.merchant,
+                memo = state.memo,
+                nowMillis = System.currentTimeMillis(),
+            )
+                .onSuccess { _uiState.update { it.copy(isSaved = true) } }
+                .onFailure { error ->
+                    _uiState.update { it.copy(errorMessage = error.message ?: "저장에 실패했습니다.") }
+                }
+        }
+    }
+
     private fun validationMessage(state: EntryUiState): String = when {
+        state.isSplit && state.amount <= 0 -> "총액을 먼저 입력해 주세요."
+        state.isSplit && state.parts.indices.any { state.partAmount(it) <= 0 } ->
+            "나눈 금액을 확인해 주세요. 남은 금액이 0원보다 커야 합니다."
+
+        state.isSplit -> "나눈 줄마다 카테고리와 결제수단을 골라 주세요."
         state.amount <= 0 -> "금액을 입력해 주세요."
         state.selectedAccountId == null -> "자산을 선택해 주세요."
         state.isTransfer && state.selectedToAccountId == null -> "입금 자산을 선택해 주세요."
@@ -289,6 +478,18 @@ class EntryViewModel(
         }
     }
 }
+
+/** 나눠서 입력하는 한 줄. 금액은 키패드로 적은 글자 그대로 둔다(마지막 줄은 쓰지 않는다). */
+data class SplitPart(
+    val categoryId: Long?,
+    val accountId: Long?,
+    val amountText: String = "",
+) {
+    val amount: Long get() = amountText.toLongOrNull() ?: 0L
+}
+
+private fun <T> List<T>.updated(index: Int, transform: (T) -> T): List<T> =
+    mapIndexed { i, item -> if (i == index) transform(item) else item }
 
 /** 고른 카테고리와, 소분류라면 그 대분류 이름. */
 data class SelectedCategory(

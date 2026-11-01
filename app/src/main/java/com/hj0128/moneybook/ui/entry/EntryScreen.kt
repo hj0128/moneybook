@@ -110,9 +110,14 @@ private val TransactionType.accountLabel: String
 /** 어느 자산 칸을 고르는 중인지. 이체는 출금/입금 두 칸을 쓴다. */
 private enum class AccountTarget { FROM, TO }
 
+/** 열린 선택 시트. [partIndex] 가 있으면 나눠서 입력 중인 그 줄의 값을 고른다. */
 private sealed interface EntrySheet {
-    data object Category : EntrySheet
-    data class Account(val target: AccountTarget, val title: String) : EntrySheet
+    data class Category(val partIndex: Int? = null) : EntrySheet
+    data class Account(
+        val target: AccountTarget,
+        val title: String,
+        val partIndex: Int? = null,
+    ) : EntrySheet
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -195,13 +200,16 @@ fun EntryScreen(
                 // 줄들을 카드 하나로 묶는다. 화면 끝까지 그어진 실선은 값과 라벨을
                 // 나누는 게 아니라 화면을 잘라 보이게 해서, 입력 칸이 여러 덩어리로 읽힌다.
                 RowCard {
-                    if (!state.isTransfer) {
+                    // 나눠서 입력 중이면 카테고리와 결제수단은 줄마다 따로 고르므로 아래 칸으로 옮겨 간다.
+                    if (!state.isTransfer && !state.isSplit) {
                         PickerRow(
                             label = "카테고리",
                             value = state.selectedCategory?.label,
                             colorArgb = state.selectedCategory?.category?.colorArgb,
-                            onClick = { dismissInputs(); sheet = EntrySheet.Category },
+                            onClick = { dismissInputs(); sheet = EntrySheet.Category() },
                         )
+                    }
+                    if (!state.isTransfer) {
                         InputRow(
                             label = "거래처",
                             value = state.merchant,
@@ -220,6 +228,7 @@ fun EntryScreen(
                     PickerRow(
                         label = "날짜",
                         value = state.date.formatFull(),
+                        divider = !state.isSplit,
                         onClick = { dismissInputs(); showDatePicker = true },
                     )
 
@@ -241,7 +250,7 @@ fun EntryScreen(
                                 sheet = EntrySheet.Account(AccountTarget.TO, "입금 자산")
                             },
                         )
-                    } else {
+                    } else if (!state.isSplit) {
                         PickerRow(
                             label = state.type.accountLabel,
                             value = state.selectedAccountName,
@@ -254,6 +263,42 @@ fun EntryScreen(
                                 )
                             },
                         )
+                    }
+                }
+
+                if (!state.isTransfer) {
+                    if (state.isSplit) {
+                        Spacer(Modifier.height(16.dp))
+                        SplitSection(
+                            state = state,
+                            onPickCategory = { index ->
+                                dismissInputs()
+                                sheet = EntrySheet.Category(partIndex = index)
+                            },
+                            onPickAccount = { index ->
+                                dismissInputs()
+                                sheet = EntrySheet.Account(
+                                    AccountTarget.FROM,
+                                    state.type.accountLabel,
+                                    partIndex = index,
+                                )
+                            },
+                            onEditAmount = { index ->
+                                focusManager.clearFocus()
+                                viewModel.editPartAmount(index)
+                            },
+                            onRemove = viewModel::removePart,
+                            onAdd = { focusManager.clearFocus(); viewModel.addPart() },
+                        )
+                    } else {
+                        // 한 번 긁은 결제에 여러 카테고리가 섞였거나(다이소: 면봉 + 라면),
+                        // 여러 수단으로 나눠 냈을 때(체크카드 + 현금) 쓴다.
+                        TextButton(
+                            onClick = { focusManager.clearFocus(); viewModel.startSplit() },
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                        ) {
+                            Text("나눠서 입력 (카테고리·결제수단별)")
+                        }
                     }
                 }
                 Spacer(Modifier.height(16.dp))
@@ -275,11 +320,13 @@ fun EntryScreen(
     when (val open = sheet) {
         null -> Unit
 
-        EntrySheet.Category -> CategoryPickerSheet(
+        is EntrySheet.Category -> CategoryPickerSheet(
             nodes = state.categoryNodes,
-            selectedId = state.selectedCategoryId,
+            selectedId = open.partIndex?.let { state.parts.getOrNull(it)?.categoryId }
+                ?: state.selectedCategoryId.takeIf { open.partIndex == null },
             onPick = {
-                viewModel.selectCategory(it)
+                val index = open.partIndex
+                if (index != null) viewModel.selectPartCategory(index, it) else viewModel.selectCategory(it)
                 sheet = null
             },
             onDismiss = { sheet = null },
@@ -292,10 +339,13 @@ fun EntryScreen(
             AccountSheetContent(
                 state = state,
                 target = open.target,
+                partIndex = open.partIndex,
                 onPick = {
-                    when (open.target) {
-                        AccountTarget.FROM -> viewModel.selectAccount(it)
-                        AccountTarget.TO -> viewModel.selectToAccount(it)
+                    val index = open.partIndex
+                    when {
+                        index != null -> viewModel.selectPartAccount(index, it)
+                        open.target == AccountTarget.FROM -> viewModel.selectAccount(it)
+                        else -> viewModel.selectToAccount(it)
                     }
                     sheet = null
                 },
@@ -306,8 +356,15 @@ fun EntryScreen(
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("이 내역을 삭제할까요?") },
-            text = { Text("삭제하면 되돌릴 수 없습니다.") },
+            title = {
+                Text(if (state.editingSplit) "나눈 결제 전체를 삭제할까요?" else "이 내역을 삭제할까요?")
+            },
+            text = {
+                Text(
+                    if (state.editingSplit) "나눠 저장한 줄이 모두 삭제됩니다. 되돌릴 수 없습니다."
+                    else "삭제하면 되돌릴 수 없습니다."
+                )
+            },
             confirmButton = {
                 TextButton(onClick = { confirmDelete = false; viewModel.delete() }) { Text("삭제") }
             },
@@ -856,16 +913,20 @@ private fun TileItem(
 private fun AccountSheetContent(
     state: EntryUiState,
     target: AccountTarget,
+    partIndex: Int? = null,
     onPick: (Long) -> Unit,
 ) {
     // 이체에서 출금과 입금이 같은 자산이면 안 되므로 반대쪽에 고른 것은 막는다.
-    val blockedId = when (target) {
-        AccountTarget.FROM -> state.selectedToAccountId
-        AccountTarget.TO -> state.selectedAccountId
+    // 나눈 줄은 이체가 아니라 막을 것이 없다.
+    val blockedId = when {
+        partIndex != null -> null
+        target == AccountTarget.FROM -> state.selectedToAccountId
+        else -> state.selectedAccountId
     }
-    val selectedId = when (target) {
-        AccountTarget.FROM -> state.selectedAccountId
-        AccountTarget.TO -> state.selectedToAccountId
+    val selectedId = when {
+        partIndex != null -> state.parts.getOrNull(partIndex)?.accountId
+        target == AccountTarget.FROM -> state.selectedAccountId
+        else -> state.selectedToAccountId
     }
 
     TileGrid(
@@ -883,6 +944,161 @@ private fun AccountSheetContent(
         },
         onClick = onPick,
     )
+}
+
+/**
+ * 나눠서 입력하는 칸. 줄마다 카테고리 · 결제수단 · 금액.
+ *
+ * 마지막 줄은 남은 금액을 자동으로 받는다. 둘로 나누는 흔한 경우에는 첫 줄 금액만 적으면 끝난다.
+ */
+@Composable
+private fun SplitSection(
+    state: EntryUiState,
+    onPickCategory: (Int) -> Unit,
+    onPickAccount: (Int) -> Unit,
+    onEditAmount: (Int) -> Unit,
+    onRemove: (Int) -> Unit,
+    onAdd: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "나눠서 입력",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onAdd) { Text("+ 줄 추가") }
+    }
+    RowCard {
+        state.parts.forEachIndexed { index, part ->
+            SplitPartRow(
+                state = state,
+                index = index,
+                part = part,
+                onPickCategory = { onPickCategory(index) },
+                onPickAccount = { onPickAccount(index) },
+                onEditAmount = { onEditAmount(index) },
+                onRemove = { onRemove(index) },
+            )
+            if (index != state.parts.lastIndex) RowDivider()
+        }
+    }
+    Text(
+        text = "마지막 줄에는 남은 금액이 자동으로 들어갑니다. 한 줄만 남기면 나누기가 끝납니다.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+private fun SplitPartRow(
+    state: EntryUiState,
+    index: Int,
+    part: SplitPart,
+    onPickCategory: () -> Unit,
+    onPickAccount: () -> Unit,
+    onEditAmount: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val category = state.categoryNodes.findSelected(part.categoryId)
+    val accountName = state.accounts.firstOrNull { it.id == part.accountId }?.name
+    val isRemainder = index == state.parts.lastIndex
+    val amount = state.partAmount(index)
+    val editing = state.keypadVisible && state.keypadTarget == index
+    val amountColor = when {
+        // 앞 줄들이 총액을 넘겨 남은 금액이 0 이하면 저장할 수 없다. 색으로 먼저 알린다.
+        isRemainder && amount <= 0 -> MaterialTheme.colorScheme.error
+        editing -> MaterialTheme.colorScheme.primary
+        !isRemainder && part.amountText.isEmpty() -> MaterialTheme.colorScheme.outline
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+
+    Column(modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(MaterialTheme.shapes.small)
+                    .clickable(onClickLabel = "카테고리 선택", onClick = onPickCategory)
+                    .heightIn(min = 44.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(
+                            category?.category?.colorArgb?.let { Color(it) }
+                                ?: MaterialTheme.colorScheme.outlineVariant
+                        ),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = category?.label ?: "카테고리 선택",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (category == null) MaterialTheme.colorScheme.outline
+                    else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Column(
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier
+                    .clip(MaterialTheme.shapes.small)
+                    .clickable(enabled = !isRemainder, onClickLabel = "금액 입력", onClick = onEditAmount)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = if (!isRemainder && part.amountText.isEmpty()) "금액" else "${amount.formatAmount()}원",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = amountColor,
+                )
+                if (isRemainder) {
+                    Text(
+                        text = "남은 금액",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
+            IconButton(onClick = onRemove, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "이 줄 삭제",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.small)
+                .clickable(onClickLabel = "결제수단 선택", onClick = onPickAccount)
+                .padding(start = 16.dp, end = 4.dp, top = 2.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = accountName ?: "${state.type.accountLabel} 선택",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (accountName == null) MaterialTheme.colorScheme.outline
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.outline,
+            )
+        }
+    }
 }
 
 /** 저장 버튼. 키패드가 접혀 있어도 눌러야 하므로 키패드 밖에 둔다. */

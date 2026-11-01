@@ -283,6 +283,56 @@ class LedgerRepository(
 
     suspend fun deleteTransaction(id: Long) = transactionDao.deleteById(id)
 
+    /** 결제 단위 삭제. 일별 탭처럼 나눈 결제를 한 줄로 보여주는 곳에서 쓴다. */
+    suspend fun deletePayment(id: Long) = transactionDao.deletePayment(id)
+
+    /** 고칠 결제의 줄들. 나누지 않은 내역이면 그 한 줄. */
+    suspend fun findPaymentParts(id: Long): List<TransactionEntity> {
+        val entity = transactionDao.findById(id) ?: return emptyList()
+        val groupId = entity.splitGroupId ?: return listOf(entity)
+        return transactionDao.findGroup(groupId)
+    }
+
+    /**
+     * 나눠서 입력한 결제를 저장한다. [replacingId] 가 있으면 그 결제(묶음 전체)를 바꾼다.
+     *
+     * 날짜·거래처·메모·종류는 결제 하나에 하나라 모든 줄이 같은 값을 갖는다.
+     * 줄이 하나뿐이면 나누지 않은 평범한 내역으로 저장된다.
+     */
+    suspend fun savePayment(
+        replacingId: Long?,
+        parts: List<PaymentPart>,
+        type: TransactionType,
+        date: LocalDate,
+        merchant: String,
+        memo: String,
+        nowMillis: Long,
+    ): Result<Unit> {
+        if (parts.isEmpty()) return Result.failure(IllegalArgumentException("나눈 줄이 없습니다."))
+        if (type == TransactionType.TRANSFER) {
+            return Result.failure(IllegalArgumentException("이체는 나눌 수 없습니다."))
+        }
+        if (parts.any { it.amount <= 0 }) {
+            return Result.failure(IllegalArgumentException("나눈 금액은 모두 0보다 커야 합니다."))
+        }
+        // 고치는 중이면 처음 넣은 시각을 지킨다. 바꿀 때마다 같은 날 안에서 맨 위로 올라가면 어색하다.
+        val createdAt = replacingId?.let { transactionDao.findById(it)?.createdAt } ?: nowMillis
+        val rows = parts.map { part ->
+            TransactionEntity(
+                amount = part.amount,
+                type = type,
+                categoryId = part.categoryId,
+                accountId = part.accountId,
+                dateEpochDay = date.toEpochDay(),
+                merchant = merchant.trim(),
+                memo = memo.trim(),
+                createdAt = createdAt,
+            )
+        }
+        transactionDao.replacePayment(replacingId, rows)
+        return Result.success(Unit)
+    }
+
     // ---- 자산 관리 ----
 
     suspend fun accountUsage(accountId: Long): Int = accountDao.countUsage(accountId)
@@ -395,3 +445,10 @@ internal fun List<TransactionDetail>.toSummary(): MonthlySummary {
     }
     return MonthlySummary(income = income, expense = expense)
 }
+
+/** 나눈 결제의 한 줄. */
+data class PaymentPart(
+    val amount: Long,
+    val categoryId: Long,
+    val accountId: Long,
+)

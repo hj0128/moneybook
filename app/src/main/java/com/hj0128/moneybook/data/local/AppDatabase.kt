@@ -20,7 +20,7 @@ import com.hj0128.moneybook.data.local.entity.TransactionEntity
         CategoryEntity::class,
         AccountEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -43,7 +43,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 // 외래키 제약을 실제로 켜준다(Room 은 기본으로 켜지 않는다).
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -121,5 +121,20 @@ internal val MIGRATION_4_5 = object : Migration(4, 5) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE accounts ADD COLUMN limit_amount INTEGER")
         db.execSQL("ALTER TABLE accounts ADD COLUMN limit_period TEXT")
+    }
+}
+
+/**
+ * v6: 한 결제를 여러 줄로 나눠 저장한다(다이소 7,500원 = 생필품 1,500원 + 식비 6,000원).
+ *
+ * 기존 내역은 null 이라 나누지 않은 결제로 남는다. 인덱스 이름은 Room 이 엔티티에서 만드는 이름과
+ * 같아야 스키마 검증을 통과한다.
+ */
+internal val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE transactions ADD COLUMN split_group_id INTEGER")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_transactions_split_group_id ON transactions(split_group_id)"
+        )
     }
 }

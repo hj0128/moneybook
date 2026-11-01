@@ -192,7 +192,10 @@ class LedgerViewModel(
                 yearMonth = month,
                 summary = items.toSummary(),
                 // 하루 머리글의 합계도 걸러진 것만으로 다시 계산되도록 묶기 전에 거른다.
-                groups = items.filter { filter.matches(it.type) }.toDayGroups().applySort(sortOrder),
+                groups = items.filter { filter.matches(it.type) }
+                    .collapseSplits()
+                    .toDayGroups()
+                    .applySort(sortOrder),
                 sortOrder = sortOrder,
                 filter = filter,
                 hasAnyInMonth = items.isNotEmpty(),
@@ -321,8 +324,9 @@ class LedgerViewModel(
         _tab.value = LedgerTab.DAILY
     }
 
+    /** 일별 탭의 한 줄은 결제 하나라, 나눈 결제면 묶음 전체를 지운다. */
     fun delete(id: Long) {
-        viewModelScope.launch { repository.deleteTransaction(id) }
+        viewModelScope.launch { repository.deletePayment(id) }
     }
 
     companion object {
@@ -344,6 +348,38 @@ class LedgerViewModel(
  *
  * DAO 가 날짜 내림차순으로 주므로 groupBy 결과도 최신순이다.
  */
+/**
+ * 나눈 결제를 한 줄로 합친다. 일별 탭은 카드 명세서와 한 줄씩 맞춰 보는 곳이라 결제 단위가 맞다.
+ *
+ * 합친 줄은 처음 입력한 줄을 바탕으로 금액은 합계, 카테고리·결제수단은 "생필품 외 1"처럼 적는다.
+ * id 도 첫 줄 것이라 누르면 입력 화면이 묶음 전체를 불러온다.
+ */
+internal fun List<TransactionDetail>.collapseSplits(): List<TransactionDetail> {
+    val partsByGroup = filter { it.splitGroupId != null }.groupBy { it.splitGroupId }
+    val seen = mutableSetOf<Long>()
+    return mapNotNull { item ->
+        val groupId = item.splitGroupId ?: return@mapNotNull item
+        if (!seen.add(groupId)) return@mapNotNull null
+        // 같은 날 같은 시각이라 쿼리 순서로는 줄 순서가 정해지지 않는다. 입력한 순서(id)로 맞춘다.
+        val parts = partsByGroup.getValue(groupId).sortedBy { it.id }
+        parts.first().copy(
+            amount = parts.sumOf { it.amount },
+            categoryName = parts.summaryLabel { it.categoryName ?: "미분류" },
+            accountName = parts.summaryLabel { it.accountName },
+        )
+    }
+}
+
+/** 값이 하나면 그대로, 여럿이면 "첫 값 외 N". */
+private fun List<TransactionDetail>.summaryLabel(pick: (TransactionDetail) -> String?): String? {
+    val names = mapNotNull(pick).distinct()
+    return when (names.size) {
+        0 -> null
+        1 -> names.single()
+        else -> "${names.first()} 외 ${names.size - 1}"
+    }
+}
+
 internal fun List<TransactionDetail>.toDayGroups(): List<DayGroup> =
     groupBy { it.date }.map { (date, dayItems) ->
         DayGroup(date = date, dayTotal = dayItems.toSummary(), items = dayItems)
