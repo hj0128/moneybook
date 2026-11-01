@@ -196,7 +196,7 @@ fun CategoryDetailScreen(
                     }
                     if (state.showsTrend) {
                         item(key = "trend") {
-                            MonthlyTrend(state, selectedChild)
+                            TrendChart(state, selectedChild)
                         }
                     }
                     if (state.hasBreakdown) {
@@ -294,18 +294,20 @@ private fun CategoryDetailHeader(state: CategoryDetailUiState) {
 }
 
 /**
- * 월별 추이. 한 해를 볼 때 "어느 달에 많이 나갔나"를 보여주는 1~12월 세로 막대.
+ * 추이 막대. 한 해를 보면 1~12월, 한 달을 보면 1주차·2주차 … 달력 주별.
+ * "그 기간 안에서 언제 많이 나갔나"를 보여준다. 다른 기간과의 비교는 넣지 않는다.
  *
- * 막대마다 금액을 적으면 12개 숫자가 겹쳐 읽을 수 없다. 대신 누른 달 하나만 위에 크게
- * 적는다. 처음에는 가장 많이 쓴 달을 골라 둔다. 그게 이 그래프에서 제일 먼저 궁금한 답이다.
+ * 막대마다 금액을 적으면 숫자가 겹쳐 읽을 수 없다. 대신 누른 칸 하나만 위에 크게
+ * 적는다. 처음에는 가장 많이 쓴 칸을 골라 둔다. 그게 이 그래프에서 제일 먼저 궁금한 답이다.
  */
 @Composable
-private fun MonthlyTrend(state: CategoryDetailUiState, child: CategoryTotal?) {
-    val trend = state.monthlyTrend(child?.categoryId)
-    val maxValue = trend.maxOrNull() ?: 0L
-    val peakMonth = trend.indexOf(maxValue) + 1
-    // 다른 해·카테고리로 바뀌면 고른 달도 그 데이터의 최대 달로 다시 잡는다.
-    var selectedMonth by remember(trend) { mutableStateOf(peakMonth) }
+private fun TrendChart(state: CategoryDetailUiState, child: CategoryTotal?) {
+    val bars = state.trend(child?.categoryId)
+    val maxValue = bars.maxOfOrNull { it.amount } ?: 0L
+    val peakIndex = bars.indexOfFirst { it.amount == maxValue }.coerceAtLeast(0)
+    // 다른 기간·카테고리로 바뀌면 고른 칸도 그 데이터의 최대 칸으로 다시 잡는다.
+    var selectedIndex by remember(bars) { mutableStateOf(peakIndex) }
+    val selectedBar = bars.getOrNull(selectedIndex)
     val barColor = (child?.colorArgb ?: state.categoryColor)?.let { Color(it) }
         ?: MaterialTheme.colorScheme.outline
 
@@ -317,21 +319,23 @@ private fun MonthlyTrend(state: CategoryDetailUiState, child: CategoryTotal?) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 // 소분류를 골랐으면 제목에 적는다. 막대 색만으로는 무엇의 추이인지 확신하기 어렵다.
-                text = child?.let { "월별 추이 · ${it.name}" } ?: "월별 추이",
+                text = child?.let { "${state.trendTitle} · ${it.name}" } ?: state.trendTitle,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.weight(1f))
-            Text(
-                text = "${selectedMonth}월 ",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = if (state.isFutureMonth(selectedMonth)) "-" else trend[selectedMonth - 1].formatWon(),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
+            selectedBar?.let { bar ->
+                Text(
+                    text = "${bar.label} ",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = if (bar.isFuture) "-" else bar.amount.formatWon(),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
         Spacer(Modifier.height(10.dp))
         Row(
@@ -340,32 +344,32 @@ private fun MonthlyTrend(state: CategoryDetailUiState, child: CategoryTotal?) {
                 .height(TrendBarMaxHeight),
             verticalAlignment = Alignment.Bottom,
         ) {
-            trend.forEachIndexed { index, value ->
-                val month = index + 1
-                val selected = month == selectedMonth
-                val fraction = if (maxValue <= 0L) 0f else (value.toDouble() / maxValue).toFloat()
+            bars.forEachIndexed { index, bar ->
+                val selected = index == selectedIndex
+                val fraction = if (maxValue <= 0L) 0f else (bar.amount.toDouble() / maxValue).toFloat()
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clickable(onClickLabel = "${month}월 금액 보기") { selectedMonth = month }
+                        .clickable(onClickLabel = "${bar.label} 금액 보기") { selectedIndex = index }
                         .semantics(mergeDescendants = true) {
-                            contentDescription = "${month}월 ${value.formatWon()}"
+                            contentDescription = "${bar.label} ${bar.amount.formatWon()}"
                         },
                     contentAlignment = Alignment.BottomCenter,
                 ) {
                     Box(
                         modifier = Modifier
-                            .padding(horizontal = 4.dp)
+                            // 주별은 칸이 넓어 막대가 뭉툭해진다. 폭을 줄여 달별 막대와 비슷한 굵기로 둔다.
+                            .padding(horizontal = if (bars.size > 6) 4.dp else 16.dp)
                             .fillMaxWidth()
-                            // 0원인 달도 바닥에 얇게 남긴다. 아예 비면 그 달이 빠진 줄 안다.
+                            // 0원인 칸도 바닥에 얇게 남긴다. 아예 비면 그 칸이 빠진 줄 안다.
                             .height(TrendBarMaxHeight * fraction.coerceIn(0f, 1f) + 2.dp)
                             .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
                             .background(
                                 when {
-                                    state.isFutureMonth(month) -> MaterialTheme.colorScheme.surfaceVariant
+                                    bar.isFuture -> MaterialTheme.colorScheme.surfaceVariant
                                     selected -> barColor
-                                    // 고르지 않은 달은 옅게. 고른 달이 어느 것인지 색으로 바로 보인다.
+                                    // 고르지 않은 칸은 옅게. 고른 칸이 어느 것인지 색으로 바로 보인다.
                                     else -> barColor.copy(alpha = 0.35f)
                                 }
                             ),
@@ -375,14 +379,15 @@ private fun MonthlyTrend(state: CategoryDetailUiState, child: CategoryTotal?) {
         }
         Spacer(Modifier.height(4.dp))
         Row(modifier = Modifier.fillMaxWidth()) {
-            (1..12).forEach { month ->
+            bars.forEachIndexed { index, bar ->
+                val selected = index == selectedIndex
                 Text(
-                    text = "$month",
+                    text = bar.axisLabel,
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelSmall,
-                    fontWeight = if (month == selectedMonth) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (month == selectedMonth) {
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) {
                         MaterialTheme.colorScheme.onSurface
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -435,7 +440,7 @@ private fun ChildBreakdown(
     selectedId: Long?,
     onSelect: (Long) -> Unit,
 ) {
-    // 고르면 아래 내역이 그 줄로 좁혀지고, 한 해를 볼 때는 추이 막대도 함께 바뀐다.
+    // 고르면 아래 내역과 위 추이 막대가 함께 그 줄로 좁혀진다.
     val selectable = state.breakdownFiltersTrend
     Column(
         modifier = Modifier
@@ -443,7 +448,7 @@ private fun ChildBreakdown(
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
         Text(
-            text = if (selectable) "${state.breakdownLabel} · 눌러서 골라 보기" else state.breakdownLabel,
+            text = state.breakdownLabel,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 8.dp),

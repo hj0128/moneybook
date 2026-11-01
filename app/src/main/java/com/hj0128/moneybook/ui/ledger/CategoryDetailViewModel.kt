@@ -36,6 +36,17 @@ data class AssignableCategory(
     val label: String get() = parentName?.let { "$it > ${category.name}" } ?: category.name
 }
 
+/** 추이 막대 한 칸. 년 단위면 한 달, 월 단위면 달력 한 주(월~일). */
+data class TrendBar(
+    /** 고른 칸 옆에 적는 이름. "3월" / "2주차 (5~11일)" */
+    val label: String,
+    /** 막대 아래 눈금. "3" / "2주차" */
+    val axisLabel: String,
+    val amount: Long,
+    /** 아직 오지 않은 칸. 0원과 구분해서 흐리게 그린다. "안 썼다"와 "아직 모른다"는 다르다. */
+    val isFuture: Boolean,
+)
+
 /** 이 화면이 무엇을 보고 있는지. 카테고리 하나, 카테고리가 빠진 것들, 또는 결제수단 하나. */
 sealed interface DetailSource {
     data class Category(val id: Long) : DetailSource
@@ -124,8 +135,47 @@ data class CategoryDetailUiState(
         else -> 12
     }
 
-    /** 년 단위일 때만 추이를 보여준다. 한 달짜리에 막대 하나는 위 합계와 같은 숫자다. */
-    val showsTrend: Boolean get() = period is LedgerPeriod.Year && !isEmpty
+    /** 년 단위는 달별, 월 단위는 주별 막대. 어느 쪽이든 보고 있는 기간 안만 쪼갠다. */
+    val showsTrend: Boolean get() = !isEmpty
+
+    val trendTitle: String get() = if (period is LedgerPeriod.Year) "월별 추이" else "주별 추이"
+
+    /**
+     * 추이 막대. [childId] 를 주면 그 소분류만.
+     *
+     * 월 단위의 주는 달력 주(월~일)로 끊는다. 10월 1일이 목요일이면 1~4일이 1주차다.
+     * 달력에서 보던 "몇째 주"와 같아야 "2주차에 많이 썼네"가 바로 떠오른다.
+     * 그래서 첫 주와 마지막 주는 7일보다 짧을 수 있고, 고른 칸 옆에 날짜 범위를 함께 적는다.
+     */
+    fun trend(childId: Long? = null): List<TrendBar> = when (val p = period) {
+        is LedgerPeriod.Year -> monthlyTrend(childId).mapIndexed { index, amount ->
+            val month = index + 1
+            TrendBar(label = "${month}월", axisLabel = "$month", amount = amount, isFuture = isFutureMonth(month))
+        }
+
+        is LedgerPeriod.Month -> {
+            val days = p.yearMonth.lengthOfMonth()
+            // 1일이 무슨 요일인지만큼 앞으로 당겨 세면 월요일마다 주가 바뀐다(월요일 = 0).
+            val offset = p.yearMonth.atDay(1).dayOfWeek.value - 1
+            fun weekOf(day: Int) = (day - 1 + offset) / 7
+            val byWeek = groups
+                .flatMap { it.items }
+                .filter { childId == null || it.categoryId == childId }
+                .groupBy { weekOf(it.date.dayOfMonth) }
+                .mapValues { (_, items) -> items.sumOf { it.amount } }
+            (0..weekOf(days)).map { week ->
+                val first = maxOf(1, week * 7 - offset + 1)
+                val last = minOf(week * 7 - offset + 7, days)
+                val range = if (first == last) "${first}일" else "$first~${last}일"
+                TrendBar(
+                    label = "${week + 1}주차 ($range)",
+                    axisLabel = "${week + 1}주차",
+                    amount = byWeek[week] ?: 0L,
+                    isFuture = p.yearMonth.atDay(first).isAfter(today),
+                )
+            }
+        }
+    }
 
     /**
      * 1월부터 12월까지의 달별 합계. 항상 12칸이다. [childId] 를 주면 그 소분류만.
