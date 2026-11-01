@@ -44,6 +44,7 @@ fun LedgerScreen(
     onOpenAccount: (accountId: Long, type: TransactionType, period: LedgerPeriod) -> Unit,
     onManageCategories: () -> Unit,
     onManageAccounts: () -> Unit,
+    onOpenBackup: () -> Unit,
     onOpenTransaction: (Long) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LedgerViewModel = viewModel(
@@ -76,6 +77,7 @@ fun LedgerScreen(
                     OverflowMenu(
                         onManageCategories = onManageCategories,
                         onManageAccounts = onManageAccounts,
+                        onOpenBackup = onOpenBackup,
                     )
                 },
             )
@@ -138,11 +140,12 @@ fun LedgerScreen(
     }
 }
 
-/** 설정거리가 관리 화면 둘뿐이라 설정 화면을 따로 두지 않고 여기에 단다. */
+/** 설정거리가 관리 화면 몇 개뿐이라 설정 화면을 따로 두지 않고 여기에 단다. */
 @Composable
 private fun OverflowMenu(
     onManageCategories: () -> Unit,
     onManageAccounts: () -> Unit,
+    onOpenBackup: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -165,6 +168,13 @@ private fun OverflowMenu(
             onClick = {
                 expanded = false
                 onManageAccounts()
+            },
+        )
+        DropdownMenuItem(
+            text = { Text("백업 / 내보내기") },
+            onClick = {
+                expanded = false
+                onOpenBackup()
             },
         )
     }

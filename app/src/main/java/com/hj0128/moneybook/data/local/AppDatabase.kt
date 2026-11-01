@@ -20,7 +20,7 @@ import com.hj0128.moneybook.data.local.entity.TransactionEntity
         CategoryEntity::class,
         AccountEntity::class,
     ],
-    version = 6,
+    version = AppDatabase.VERSION,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -31,7 +31,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun accountDao(): AccountDao
 
     companion object {
-        private const val DB_NAME = "household.db"
+        const val DB_NAME = "household.db"
+
+        /** 백업을 복원할 때 이보다 새 버전에서 만든 파일은 받지 않는다(내려가는 마이그레이션이 없다). */
+        const val VERSION = 6
 
         @Volatile
         private var instance: AppDatabase? = null

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.hj0128.moneybook.data.model.CategorySortOrder
@@ -48,7 +49,17 @@ class SettingsRepository(context: Context) {
         }
     }
 
+    /** 마지막으로 백업 파일을 만든 시각(epoch millis). 한 번도 안 했으면 null. */
+    val lastBackupAt: Flow<Long?> = dataStore.data.map { preferences -> preferences[KEY_LAST_BACKUP_AT] }
+
+    suspend fun setLastBackupAt(millis: Long) {
+        dataStore.edit { preferences ->
+            preferences[KEY_LAST_BACKUP_AT] = millis
+        }
+    }
+
     private companion object {
+        val KEY_LAST_BACKUP_AT = longPreferencesKey("last_backup_at")
         val KEY_DAY_SORT_ORDER = stringPreferencesKey("day_sort_order")
         val KEY_CATEGORY_SORT_ORDER = stringPreferencesKey("category_sort_order")
     }

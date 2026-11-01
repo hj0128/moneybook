@@ -12,6 +12,7 @@ import androidx.navigation.navArgument
 import com.hj0128.moneybook.data.model.LedgerPeriod
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.account.AccountManagerScreen
+import com.hj0128.moneybook.ui.backup.BackupScreen
 import com.hj0128.moneybook.ui.category.CategoryManagerScreen
 import com.hj0128.moneybook.ui.entry.EntryScreen
 import com.hj0128.moneybook.ui.ledger.CategoryDetailScreen
@@ -29,6 +30,7 @@ object Routes {
     fun entryEdit(transactionId: Long): String = "entry/$transactionId"
     const val CATEGORY_MANAGER = "categories"
     const val ACCOUNT_MANAGER = "accounts"
+    const val BACKUP = "backup"
 
     /**
      * 카테고리 상세. 보고 있던 기간을 같이 넘긴다.
@@ -89,6 +91,7 @@ fun AppNavHost(
                 },
                 onManageCategories = { navController.navigate(Routes.CATEGORY_MANAGER) },
                 onManageAccounts = { navController.navigate(Routes.ACCOUNT_MANAGER) },
+                onOpenBackup = { navController.navigate(Routes.BACKUP) },
                 onOpenTransaction = { navController.navigate(Routes.entryEdit(it)) },
             )
         }
@@ -107,6 +110,9 @@ fun AppNavHost(
         }
         composable(Routes.ACCOUNT_MANAGER) {
             AccountManagerScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.BACKUP) {
+            BackupScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.ENTRY) {
             EntryScreen(

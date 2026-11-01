@@ -8,6 +8,7 @@ import androidx.room.Transaction
 import androidx.room.Update
 import com.hj0128.moneybook.data.local.entity.TransactionEntity
 import com.hj0128.moneybook.data.model.CategoryTotal
+import com.hj0128.moneybook.data.model.ExportRow
 import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
@@ -302,6 +303,29 @@ interface TransactionDao {
         startEpochDay: Long,
         endEpochDay: Long,
     ): Flow<List<CategoryTotal>>
+
+    /** CSV 내보내기. 오래된 것부터, 같은 날은 입력한 순서대로. */
+    @Query(
+        """
+        SELECT t.date_epoch_day AS date_epoch_day,
+               t.type AS type,
+               t.amount AS amount,
+               COALESCE(p.name, c.name) AS parent_name,
+               CASE WHEN p.id IS NULL THEN NULL ELSE c.name END AS child_name,
+               a.name AS account_name,
+               ta.name AS to_account_name,
+               t.merchant AS merchant,
+               t.memo AS memo,
+               t.split_group_id AS split_group_id
+        FROM transactions AS t
+        LEFT JOIN categories AS c ON c.id = t.category_id
+        LEFT JOIN categories AS p ON p.id = c.parent_id
+        LEFT JOIN accounts AS a ON a.id = t.account_id
+        LEFT JOIN accounts AS ta ON ta.id = t.to_account_id
+        ORDER BY t.date_epoch_day ASC, t.created_at ASC, t.id ASC
+        """
+    )
+    suspend fun exportRows(): List<ExportRow>
 
     /** 일괄 재분류. 고른 내역을 한 카테고리로 옮긴다. */
     @Query("UPDATE transactions SET category_id = :categoryId WHERE id IN (:ids)")

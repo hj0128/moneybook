@@ -1,13 +1,9 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    기기 자동 백업(Android 11 이하). 가계부 DB 와 화면 설정만 담는다.
+    앱 안의 백업 기능과 별개로, 구글 백업이 켜진 폰이면 새 폰으로 옮길 때 함께 따라온다.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <include domain="database" path="." />
+    <include domain="file" path="datastore/" />
 </full-backup-content>

@@ -1,6 +1,7 @@
 package com.hj0128.moneybook.di
 
 import android.content.Context
+import com.hj0128.moneybook.data.backup.BackupManager
 import com.hj0128.moneybook.data.local.AppDatabase
 import com.hj0128.moneybook.data.prefs.SettingsRepository
 import com.hj0128.moneybook.data.repository.LedgerRepository
@@ -13,9 +14,19 @@ import com.hj0128.moneybook.data.repository.LedgerRepository
  */
 class AppContainer(context: Context) {
 
+    private val appContext: Context = context.applicationContext
+
     private val database: AppDatabase = AppDatabase.getInstance(context)
 
     val settingsRepository: SettingsRepository = SettingsRepository(context)
+
+    val backupManager: BackupManager by lazy {
+        BackupManager(
+            context = appContext,
+            database = database,
+            transactionDao = database.transactionDao(),
+        )
+    }
 
     val ledgerRepository: LedgerRepository by lazy {
         LedgerRepository(
