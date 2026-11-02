@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -18,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
@@ -80,37 +82,46 @@ fun UsageGauge(
         },
     ) {
         Row(verticalAlignment = Alignment.Bottom) {
-            if (name != null) {
+            // 폭이 모자라면 왼쪽이 줄어든다. 오른쪽 "남은 X원"이 두 줄로 깨지면 숫자가 반으로 갈려 읽을 수 없다.
+            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.Bottom) {
+                if (name != null) {
+                    Text(
+                        text = "$name ",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                    )
+                }
+                // 기간이 화면 위에 이미 적혀 있는 곳은 빈 값을 넘긴다.
+                if (periodLabel.isNotEmpty()) {
+                    Text(
+                        text = "$periodLabel ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
                 Text(
-                    text = "$name ",
+                    text = used.formatWon(),
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
                 )
-            }
-            // 기간이 화면 위에 이미 적혀 있는 곳은 빈 값을 넘긴다.
-            if (periodLabel.isNotEmpty()) {
                 Text(
-                    text = "$periodLabel ",
+                    text = " / ${limit.formatWon()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                text = used.formatWon(),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = " / ${limit.formatWon()}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
             Text(
                 text = remainingText,
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.SemiBold,
                 color = if (over) ledgerColors.expense else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
             )
         }
         Spacer(Modifier.height(6.dp))

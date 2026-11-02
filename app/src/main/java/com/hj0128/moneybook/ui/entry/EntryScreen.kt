@@ -88,9 +88,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.AccountBalance
+import com.hj0128.moneybook.data.model.AccountNode
 import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.RepeatUnit
 import com.hj0128.moneybook.data.model.TransactionType
+import com.hj0128.moneybook.data.model.toAccountNodes
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatAmount
 import com.hj0128.moneybook.util.formatFull
@@ -1053,24 +1055,157 @@ private fun AccountSheetContent(
         else -> state.selectedToAccountId
     }
 
-    Column(
-        modifier = Modifier
-            .heightIn(max = AccountListMaxHeight)
-            .verticalScroll(rememberScrollState()),
-    ) {
-        state.accounts.forEach { account ->
-            AccountOption(
-                account = account,
-                selected = account.id == selectedId,
-                enabled = account.id != blockedId,
-                onClick = { onPick(account.id) },
-            )
+    val nodes = remember(state.accounts) { state.accounts.toAccountNodes() }
+
+    // 하위 자산이 하나도 없으면 오른쪽 칸이 늘 빈다. 그때는 예전처럼 한 줄 목록이 낫다.
+    if (nodes.none { it.hasChildren }) {
+        Column(
+            modifier = Modifier
+                .heightIn(max = AccountListMaxHeight)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            nodes.forEach { node ->
+                AccountOption(
+                    account = node.account,
+                    selected = node.account.id == selectedId,
+                    enabled = node.account.id != blockedId,
+                    onClick = { onPick(node.account.id) },
+                )
+            }
+        }
+        return
+    }
+
+    // 카테고리 선택과 같은 두 칸. 왼쪽에 상위, 오른쪽에 그 상위에서 고를 수 있는 하위.
+    // 이미 고른 하위가 있으면 그 상위를 펼쳐 둔다. 다시 열었을 때 어디 있었는지 바로 보인다.
+    var focusedId by remember {
+        mutableStateOf(
+            nodes.firstOrNull { node -> node.hasChildren && node.children.any { it.id == selectedId } }
+                ?.account?.id
+                ?: nodes.firstOrNull { it.hasChildren }?.account?.id
+        )
+    }
+    val focused = nodes.firstOrNull { it.account.id == focusedId }
+
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Row(modifier = Modifier.height(AccountPaneHeight)) {
+        Column(
+            modifier = Modifier
+                .width(AccountParentPaneWidth)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .verticalScroll(rememberScrollState()),
+        ) {
+            nodes.forEach { node ->
+                AccountParentItem(
+                    node = node,
+                    focused = node.account.id == focusedId,
+                    holdsSelection = node.selectable.any { it.id == selectedId },
+                    // 하위가 없는 상위는 여기서 바로 고른다. 이체 반대쪽에 고른 것이면 막는다.
+                    enabled = node.hasChildren || node.account.id != blockedId,
+                    onClick = {
+                        if (node.hasChildren) focusedId = node.account.id else onPick(node.account.id)
+                    },
+                )
+            }
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = 8.dp),
+        ) {
+            focused?.children?.forEach { account ->
+                AccountOption(
+                    account = account,
+                    selected = account.id == selectedId,
+                    enabled = account.id != blockedId,
+                    onClick = { onPick(account.id) },
+                )
+            }
         }
     }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 /** 자산이 많아도 시트가 화면을 다 덮지 않게. 넘치면 안에서 스크롤한다. */
 private val AccountListMaxHeight = 480.dp
+private val AccountPaneHeight = 400.dp
+/** 카테고리 칸보다 조금 넓다. 상위 줄에 "-5,112,450원" 같은 잔액이 함께 들어가야 한다. */
+private val AccountParentPaneWidth = 156.dp
+
+/**
+ * 왼쪽 상위 자산 한 줄. 카테고리 선택의 대분류 줄([ParentItem])과 같은 모양이다.
+ * 잔액은 하위까지 합친 값을 작게 붙인다. 고르기 전에 "이 묶음에 얼마 남았나"를 본다.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AccountParentItem(
+    node: AccountNode,
+    focused: Boolean,
+    holdsSelection: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val account = node.account
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (focused) BottomSheetDefaults.ContainerColor else Color.Transparent)
+            .clickable(
+                enabled = enabled,
+                onClickLabel = if (node.hasChildren) "${account.name} 펼치기" else "${account.name} 선택",
+                onClick = onClick,
+            )
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+            .alpha(if (enabled) 1f else 0.38f),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(Color(account.colorArgb)),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = account.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (focused) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = node.totalBalance.formatWon(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (holdsSelection) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "선택됨",
+                modifier = Modifier.size(16.dp),
+                tint = Color(account.colorArgb),
+            )
+        }
+        if (node.hasChildren) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.outline,
+            )
+        }
+    }
+}
 
 /**
  * 결제수단 한 줄. [색 배지] 이름 / 종류 · 잔액 (· 한도 남은 금액) ……… ✓

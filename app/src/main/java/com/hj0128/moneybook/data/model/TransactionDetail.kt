@@ -19,6 +19,9 @@ data class TransactionDetail(
     val categoryName: String?,
     @ColumnInfo(name = "category_color")
     val categoryColor: Int?,
+    /** 결제수단 상세에서 하위 자산별로 걸러 볼 때 쓴다. 이름은 부모가 다르면 겹칠 수 있다. */
+    @ColumnInfo(name = "account_id")
+    val accountId: Long? = null,
     @ColumnInfo(name = "account_name")
     val accountName: String?,
     @ColumnInfo(name = "to_account_name")
@@ -92,8 +95,16 @@ data class AccountBalance(
     /** 지금 주기(이번 달 또는 올해)에 이 자산으로 쓴 지출. 한도가 없으면 0. */
     @ColumnInfo(name = "limit_used")
     val limitUsed: Long = 0L,
+    /** 상위 자산이면 null, 하위 자산이면 부모 자산 id. */
+    @ColumnInfo(name = "parent_id")
+    val parentId: Long? = null,
+    /** 같은 부모 아래에서의 순서. */
+    @ColumnInfo(name = "sort_order")
+    val sortOrder: Int = 0,
 ) {
     val hasLimit: Boolean get() = limitAmount != null && limitPeriod != null
+
+    val isTopLevel: Boolean get() = parentId == null
 
     /** 음수면 초과한 금액이다. */
     val limitRemaining: Long get() = (limitAmount ?: 0L) - limitUsed

@@ -12,6 +12,8 @@ import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.RepeatUnit
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.flatten
+import com.hj0128.moneybook.data.model.selectableAccounts
+import com.hj0128.moneybook.data.model.toAccountNodes
 import com.hj0128.moneybook.data.repository.LedgerRepository
 import com.hj0128.moneybook.data.repository.PaymentPart
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -147,8 +149,9 @@ class EntryViewModel(
                 _uiState.update { state ->
                     state.copy(
                         accounts = accounts,
+                        // 하위가 있는 상위는 고를 수 없으니 기본값도 고를 수 있는 것 중 첫째다.
                         selectedAccountId = state.selectedAccountId
-                            ?: accounts.firstOrNull()?.id,
+                            ?: accounts.toAccountNodes().selectableAccounts().firstOrNull()?.id,
                     )
                 }
             }

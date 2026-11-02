@@ -42,7 +42,7 @@ abstract class AppDatabase : RoomDatabase() {
         const val DB_NAME = "household.db"
 
         /** 백업을 복원할 때 이보다 새 버전에서 만든 파일은 받지 않는다(내려가는 마이그레이션이 없다). */
-        const val VERSION = 8
+        const val VERSION = 9
 
         @Volatile
         private var instance: AppDatabase? = null
@@ -54,7 +54,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 // 외래키 제약을 실제로 켜준다(Room 은 기본으로 켜지 않는다).
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -197,3 +197,18 @@ internal const val BUDGETS_CREATE_SQL = "CREATE TABLE IF NOT EXISTS `budgets` ("
     "`category_id` INTEGER NOT NULL, `year_month` INTEGER NOT NULL, `amount` INTEGER, " +
     "PRIMARY KEY(`category_id`, `year_month`), " +
     "FOREIGN KEY(`category_id`) REFERENCES `categories`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
+
+/**
+ * v9: 자산에 상위/하위(체크카드 > A카드/B카드). 카테고리의 parent_id 와 같은 구조다.
+ *
+ * null 을 허용하는 칸이라 기존 자산은 모두 상위로 남고, 순서 번호도 그대로 상위 순서가 된다.
+ */
+internal val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE `accounts` ADD COLUMN `parent_id` INTEGER " +
+                "REFERENCES `accounts`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_accounts_parent_id` ON `accounts` (`parent_id`)")
+    }
+}

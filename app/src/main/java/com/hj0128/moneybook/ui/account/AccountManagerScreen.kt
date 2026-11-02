@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -58,11 +59,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hj0128.moneybook.data.model.AccountBalance
+import com.hj0128.moneybook.data.model.AccountNode
 import com.hj0128.moneybook.data.model.AccountType
 import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.repository.AccountLimit
@@ -71,11 +74,15 @@ import com.hj0128.moneybook.ui.common.ReorderableList
 import com.hj0128.moneybook.ui.theme.CategoryPalette
 import com.hj0128.moneybook.ui.theme.paletteColorOrDefault
 import com.hj0128.moneybook.util.formatWon
+import com.hj0128.moneybook.util.withSubjectJosa
 
 private val accountTypes = listOf(AccountType.CASH, AccountType.BANK, AccountType.CARD)
 
 /**
- * 자산 관리: 현금·계좌·카드를 추가/수정/삭제하고, 순서를 바꾼다.
+ * 자산 관리: 상위 > 하위 자산을 보고 추가/수정/삭제하고, 순서를 바꾼다.
+ *
+ * 카테고리 관리와 같은 모양이다. 상위 줄을 누르면 하위로 들어가고, 수정은 연필로 한다.
+ * 자산도 카테고리처럼 두 단계라서, 같은 구조를 다른 손놀림으로 다루게 하지 않는다.
  *
  * 여기서 정한 순서가 내역을 적을 때 결제수단이 놓이는 순서다. 자주 쓰는 것을 앞에 두면
  * 매번 찾아 누르는 손이 줄어든다.
@@ -87,13 +94,16 @@ fun AccountManagerScreen(
     modifier: Modifier = Modifier,
     viewModel: AccountManagerViewModel = viewModel(factory = AccountManagerViewModel.factory()),
 ) {
-    val accounts by viewModel.accounts.collectAsStateWithLifecycle()
+    val nodes by viewModel.nodes.collectAsStateWithLifecycle()
+    val openParent by viewModel.openParent.collectAsStateWithLifecycle()
     val editTarget by viewModel.editTarget.collectAsStateWithLifecycle()
     val deleteTarget by viewModel.deleteTarget.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
     val reorderDraft by viewModel.reorderDraft.collectAsStateWithLifecycle()
 
+    // 뒤로가기는 한 겹씩만 벗긴다. 순서 변경 중이면 모드만 끝내고, 하위를 보는 중이면 상위 목록으로.
     BackHandler(enabled = reorderDraft != null) { viewModel.stopReorder() }
+    BackHandler(enabled = reorderDraft == null && openParent != null) { viewModel.closeParent() }
 
     Scaffold(
         modifier = modifier,
@@ -101,17 +111,38 @@ fun AccountManagerScreen(
             TopAppBar(
                 navigationIcon = {
                     IconButton(
-                        onClick = { if (reorderDraft != null) viewModel.stopReorder() else onBack() },
+                        onClick = {
+                            when {
+                                reorderDraft != null -> viewModel.stopReorder()
+                                openParent != null -> viewModel.closeParent()
+                                else -> onBack()
+                            }
+                        },
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
                     }
                 },
-                title = { Text(if (reorderDraft != null) "순서 변경" else "자산 관리") },
+                title = {
+                    val parent = openParent
+                    when {
+                        reorderDraft != null -> Text("순서 변경")
+                        parent == null -> Text("자산 관리")
+                        else -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(parent.account.colorArgb)),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(parent.account.name)
+                        }
+                    }
+                },
                 actions = {
                     if (reorderDraft != null) {
                         TextButton(onClick = viewModel::stopReorder) { Text("완료") }
-                    } else if (accounts.size >= 2) {
-                        // 하나뿐이면 순서라는 게 없다.
+                    } else if (canReorder(openParent, nodes)) {
                         IconButton(onClick = viewModel::startReorder) {
                             Icon(Icons.Default.SwapVert, contentDescription = "순서 변경")
                         }
@@ -120,17 +151,34 @@ fun AccountManagerScreen(
             )
         },
         floatingActionButton = {
+            val parent = openParent
             // 순서를 바꾸는 중에는 추가 버튼을 감춘다. 목록이 바뀌면 끌던 자리가 어긋난다.
             if (reorderDraft == null) {
-                FloatingActionButton(onClick = viewModel::startAdd) {
-                    Icon(Icons.Default.Add, contentDescription = "자산 추가")
+                FloatingActionButton(
+                    onClick = {
+                        if (parent == null) {
+                            viewModel.startAddTopLevel()
+                        } else {
+                            viewModel.startAddChild(parent.account)
+                        }
+                    },
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = if (parent == null) "자산 추가" else "하위 자산 추가",
+                    )
                 }
             }
         },
     ) { innerPadding ->
-        val draft = reorderDraft
-        if (draft != null) {
-            Column(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize(),
+        ) {
+            val parent = openParent
+            val draft = reorderDraft
+            if (draft != null) {
                 Text(
                     text = "오른쪽 손잡이를 끌어 순서를 바꾸세요.",
                     style = MaterialTheme.typography.bodySmall,
@@ -147,21 +195,30 @@ fun AccountManagerScreen(
                 ) { account ->
                     ReorderRow(account = account)
                 }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .padding(innerPadding)
-                    .fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 88.dp),
-            ) {
-                items(accounts, key = { it.id }) { account ->
-                    AccountRow(
-                        account = account,
-                        onEdit = { viewModel.startEdit(account) },
-                        onDelete = { viewModel.startDelete(account) },
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            } else if (parent == null) {
+                LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+                    items(nodes, key = { it.account.id }) { node ->
+                        ParentRow(
+                            node = node,
+                            onOpen = { viewModel.openParent(node.account.id) },
+                            onEdit = { viewModel.startEdit(node.account) },
+                            onDelete = { viewModel.startDelete(node.account) },
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+            } else if (parent.children.isEmpty()) {
+                EmptyChildren(parentName = parent.account.name)
+            } else {
+                LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+                    items(parent.children, key = { it.id }) { child ->
+                        ChildRow(
+                            account = child,
+                            onEdit = { viewModel.startEdit(child) },
+                            onDelete = { viewModel.startDelete(child) },
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
                 }
             }
         }
@@ -183,6 +240,153 @@ fun AccountManagerScreen(
             onSelectTarget = viewModel::selectDeleteTarget,
             onDismiss = viewModel::dismissDelete,
             onConfirm = viewModel::confirmDelete,
+        )
+    }
+}
+
+/** 옮길 것이 하나뿐이면 순서라는 게 없다. 눌러도 아무 일 없는 버튼은 두지 않는다. */
+private fun canReorder(openParent: AccountNode?, nodes: List<AccountNode>): Boolean =
+    if (openParent == null) nodes.size >= 2 else openParent.children.size >= 2
+
+/**
+ * 상위 자산 한 줄. 카테고리 관리의 대분류 줄과 같은 모양이다.
+ *
+ * 줄을 누르면 하위로 들어간다. 수정은 연필로만 한다. 줄 탭이 수정이면 하위를 보러 들어갈 길이 없어진다.
+ * 하위가 있으면 잔액은 하위까지 합친 값이다. 이걸 보려고 묶는 것이다.
+ */
+@Composable
+private fun ParentRow(
+    node: AccountNode,
+    onOpen: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val account = node.account
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClickLabel = "${account.name} 하위 자산 보기", onClick = onOpen),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 4.dp)
+                .heightIn(min = 64.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(Color(account.colorArgb)),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = account.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = if (node.hasChildren) {
+                        "하위 ${node.children.size}개 · ${node.totalBalance.formatWon()}"
+                    } else {
+                        "${account.type.label} · ${account.balance.formatWon()}"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            RowActions(name = account.name, onEdit = onEdit, onDelete = onDelete)
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.outline,
+            )
+            Spacer(Modifier.width(8.dp))
+        }
+        LimitBar(account)
+    }
+}
+
+/** 하위 자산 한 줄. 더 들어갈 곳이 없으므로 줄 탭이 수정이다(카테고리 소분류 줄과 같다). */
+@Composable
+private fun ChildRow(
+    account: AccountBalance,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClickLabel = "${account.name} 수정", onClick = onEdit),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 4.dp)
+                .heightIn(min = 64.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(Color(account.colorArgb)),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = account.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${account.type.label} · ${account.balance.formatWon()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            RowActions(name = account.name, onEdit = onEdit, onDelete = onDelete)
+        }
+        LimitBar(account)
+    }
+}
+
+/**
+ * 한도 막대. 버튼 아래까지 넓게 쓴다. 버튼 옆 좁은 칸에 넣으면 "남은 X원"이 잘린다.
+ * 이름 글자가 시작하는 자리(여백 16 + 점 12 + 간격 12)에 맞춘다.
+ */
+@Composable
+private fun LimitBar(account: AccountBalance) {
+    if (account.hasLimit) {
+        LimitGauge(
+            account = account,
+            modifier = Modifier.padding(start = 40.dp, end = 16.dp, bottom = 12.dp),
+        )
+    }
+}
+
+@Composable
+private fun RowActions(name: String, onEdit: () -> Unit, onDelete: () -> Unit) {
+    IconButton(onClick = onEdit) {
+        Icon(
+            imageVector = Icons.Default.Edit,
+            contentDescription = "$name 수정",
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    IconButton(onClick = onDelete) {
+        Icon(
+            imageVector = Icons.Default.Delete,
+            contentDescription = "$name 삭제",
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -220,60 +424,17 @@ private fun ReorderRow(account: AccountBalance) {
 }
 
 @Composable
-private fun AccountRow(
-    account: AccountBalance,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClickLabel = "${account.name} 수정", onClick = onEdit)
-            .padding(start = 16.dp, end = 4.dp)
-            .heightIn(min = 64.dp),
-        verticalAlignment = Alignment.CenterVertically,
+private fun EmptyChildren(parentName: String) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .size(12.dp)
-                .clip(CircleShape)
-                .background(Color(account.colorArgb)),
+        Text(
+            text = "$parentName 안에 하위 자산이 없습니다.\n오른쪽 아래 + 버튼으로 추가해 보세요.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = account.name,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "${account.type.label} · ${account.balance.formatWon()}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (account.hasLimit) {
-                Spacer(Modifier.height(6.dp))
-                LimitGauge(account = account, modifier = Modifier.padding(bottom = 8.dp))
-            }
-        }
-        IconButton(onClick = onEdit) {
-            Icon(
-                imageVector = Icons.Default.Edit,
-                contentDescription = "${account.name} 수정",
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        IconButton(onClick = onDelete) {
-            Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = "${account.name} 삭제",
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }
 
@@ -288,6 +449,7 @@ private fun AccountEditDialog(
         colorArgb: Int,
         initialBalance: Long,
         limit: AccountLimit?,
+        parentId: Long?,
     ) -> Unit,
     onErrorShown: () -> Unit,
 ) {
@@ -305,10 +467,20 @@ private fun AccountEditDialog(
     // null 이면 한도 없음. 대부분의 자산은 한도가 없어서 기본값도 없음이다.
     var limitPeriod by remember(target) { mutableStateOf(existing?.limitPeriod) }
     var limitText by remember(target) { mutableStateOf(existing?.limitAmount?.toString().orEmpty()) }
+    // 상위는 수정 창에서 바꾸지 않는다. 카테고리 소분류처럼 들어온 자리가 곧 자리다.
+    val parentId = existing?.parentId
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (existing == null) "자산 추가" else "자산 수정") },
+        title = {
+            Text(
+                when (target) {
+                    AccountEditTarget.NewTopLevel -> "자산 추가"
+                    is AccountEditTarget.NewChild -> "${target.parent.name} 안에 하위 자산 추가"
+                    is AccountEditTarget.Edit -> "자산 수정"
+                }
+            )
+        },
         text = {
             Column(
                 modifier = Modifier
@@ -329,16 +501,20 @@ private fun AccountEditDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
 
-                Spacer(Modifier.height(16.dp))
-                DialogLabel("종류")
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    accountTypes.forEachIndexed { index, option ->
-                        SegmentedButton(
-                            selected = option == type,
-                            onClick = { type = option },
-                            shape = SegmentedButtonDefaults.itemShape(index, accountTypes.size),
-                        ) {
-                            Text(option.label)
+                // 하위 자산은 상위의 종류를 따른다. 체크카드 아래에서 현금/은행을 고르라고 하면 이상하다.
+                val underParent = target is AccountEditTarget.NewChild || parentId != null
+                if (!underParent) {
+                    Spacer(Modifier.height(16.dp))
+                    DialogLabel("종류")
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        accountTypes.forEachIndexed { index, option ->
+                            SegmentedButton(
+                                selected = option == type,
+                                onClick = { type = option },
+                                shape = SegmentedButtonDefaults.itemShape(index, accountTypes.size),
+                            ) {
+                                Text(option.label)
+                            }
                         }
                     }
                 }
@@ -409,6 +585,7 @@ private fun AccountEditDialog(
                         colorArgb,
                         initialBalanceText.toLongOrNull() ?: 0L,
                         limitPeriod?.let { AccountLimit(limitText.toLongOrNull() ?: 0L, it) },
+                        parentId,
                     )
                 },
                 // 한도를 고르고 금액을 비워 두면 무엇을 셀지 정할 수 없다. 저장 전에 막는다.
@@ -498,15 +675,22 @@ private fun AccountDeleteDialog(
                     .heightIn(max = 400.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
-                if (target.candidates.isEmpty()) {
+                if (target.isLast) {
                     Text(
                         text = "자산이 하나뿐입니다. 거래를 옮길 곳이 없어 지울 수 없습니다.",
                         color = MaterialTheme.colorScheme.error,
                     )
                 } else if (!target.needsReassign) {
                     Text("이 자산을 쓴 내역이 없습니다. 바로 삭제합니다.")
+                } else if (target.candidates.isEmpty()) {
+                    Text(buildDeleteSummary(target))
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "옮길 상위 자산이 없습니다. 먼저 다른 자산을 만들어 주세요.",
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 } else {
-                    Text("내역 ${target.usage}건이 이 자산에 달려 있습니다.")
+                    Text(buildDeleteSummary(target))
                     Spacer(Modifier.height(12.dp))
                     DialogLabel("어디로 옮길까요?")
                     Column(modifier = Modifier.selectableGroup()) {
@@ -555,4 +739,14 @@ private fun AccountDeleteDialog(
             TextButton(onClick = onDismiss) { Text("취소") }
         },
     )
+}
+
+/** 카테고리 삭제 문구와 같은 모양. 하위는 내역째로 옮겨진다는 걸 함께 적는다. */
+private fun buildDeleteSummary(target: AccountDeleteTarget): String {
+    val parts = buildList {
+        if (target.usage > 0) add("내역 ${target.usage}건")
+        if (target.children > 0) add("하위 자산 ${target.children}개")
+    }
+    val summary = parts.joinToString(", ")
+    return "이 자산에 ${summary.withSubjectJosa()} 달려 있습니다."
 }

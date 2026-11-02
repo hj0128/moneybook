@@ -13,6 +13,7 @@ import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.local.entity.RecurringEntity
 import com.hj0128.moneybook.data.local.entity.TransactionEntity
 import com.hj0128.moneybook.data.model.AccountBalance
+import com.hj0128.moneybook.data.model.AccountNode
 import com.hj0128.moneybook.data.model.AccountType
 import com.hj0128.moneybook.data.model.BudgetRow
 import com.hj0128.moneybook.data.model.BudgetSummary
@@ -28,6 +29,7 @@ import com.hj0128.moneybook.data.model.RepeatUnit
 import com.hj0128.moneybook.data.model.SearchCandidate
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
+import com.hj0128.moneybook.data.model.toAccountNodes
 import com.hj0128.moneybook.data.model.UncategorizedTotal
 import com.hj0128.moneybook.util.formatFull
 import kotlinx.coroutines.flow.Flow
@@ -149,6 +151,18 @@ class LedgerRepository(
     ): Flow<List<CategoryTotal>> = transactionDao.observeAccountCategoryTotals(
         accountId, type, period.start.toEpochDay(), period.end.toEpochDay(),
     )
+
+    /** 상위 자산 상세의 하위 자산별 소계. 상위에 직접 붙은 내역도 한 줄로 들어 있다. */
+    fun observeAccountChildTotals(
+        period: LedgerPeriod,
+        accountId: Long,
+        type: TransactionType,
+    ): Flow<List<CategoryTotal>> = transactionDao.observeAccountChildTotals(
+        accountId, type, period.start.toEpochDay(), period.end.toEpochDay(),
+    )
+
+    /** 상위 > 하위로 묶은 자산. 관리 화면과 입력 화면이 같이 쓴다(카테고리 트리와 같은 역할). */
+    fun observeAccountTree(): Flow<List<AccountNode>> = observeAccounts().map { it.toAccountNodes() }
 
     // ---- 카테고리 관리 ----
 
@@ -477,28 +491,31 @@ class LedgerRepository(
         colorArgb: Int,
         initialBalance: Long,
         limit: AccountLimit? = null,
+        parentId: Long? = null,
     ): Result<Long> {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("이름을 입력해 주세요."))
         limit?.validate()?.let { return Result.failure(it) }
+        validateParent(id = null, parentId = parentId)?.let { return Result.failure(it) }
         if (accountDao.countSameName(trimmed, excludeId = 0L) > 0) {
             return Result.failure(IllegalArgumentException("같은 이름이 이미 있습니다."))
         }
         val id = accountDao.insert(
             AccountEntity(
                 name = trimmed,
-                type = type,
+                type = typeUnder(parentId, type),
                 colorArgb = colorArgb,
                 initialBalance = initialBalance,
-                sortOrder = accountDao.nextSortOrder(),
+                sortOrder = accountDao.nextSortOrder(parentId),
                 limitAmount = limit?.amount,
                 limitPeriod = limit?.period,
+                parentId = parentId,
             )
         )
         return Result.success(id)
     }
 
-    /** 자산 순서 저장. 카테고리와 달리 목록이 하나뿐이라 전체를 다시 매긴다. */
+    /** 자산 순서 저장. 지금 보고 있는 목록(상위끼리, 또는 한 상위의 하위끼리)만 넘어온다. */
     suspend fun reorderAccounts(orderedIds: List<Long>) {
         accountDao.applyOrder(orderedIds)
     }
@@ -510,27 +527,59 @@ class LedgerRepository(
         colorArgb: Int,
         initialBalance: Long,
         limit: AccountLimit? = null,
+        parentId: Long? = null,
     ): Result<Unit> {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("이름을 입력해 주세요."))
         limit?.validate()?.let { return Result.failure(it) }
         val current = accountDao.findById(id)
             ?: return Result.failure(IllegalStateException("자산을 찾을 수 없습니다."))
+        validateParent(id = id, parentId = parentId)?.let { return Result.failure(it) }
         if (accountDao.countSameName(trimmed, excludeId = id) > 0) {
             return Result.failure(IllegalArgumentException("같은 이름이 이미 있습니다."))
         }
+        val newType = typeUnder(parentId, type)
         accountDao.update(
             current.copy(
                 name = trimmed,
-                type = type,
+                type = newType,
                 colorArgb = colorArgb,
                 initialBalance = initialBalance,
                 limitAmount = limit?.amount,
                 limitPeriod = limit?.period,
+                parentId = parentId,
+                // 다른 상위로 옮기면 그 목록의 맨 끝에 넣는다. 예전 번호는 옮겨 간 곳에서 뜻이 없다.
+                sortOrder = if (parentId == current.parentId) current.sortOrder else accountDao.nextSortOrder(parentId),
             )
         )
+        // 상위의 종류를 바꾸면 하위도 따라간다. "체크카드" 아래 A카드만 "카드"로 남으면 안 된다.
+        if (newType != current.type) accountDao.updateChildrenType(id, newType)
         return Result.success(Unit)
     }
+
+    /**
+     * 하위 자산의 종류는 상위를 따른다. 체크카드 아래 A카드는 당연히 카드라서 다시 묻지 않는다.
+     * 상위가 없으면 고른 종류 그대로다.
+     */
+    private suspend fun typeUnder(parentId: Long?, chosen: AccountType): AccountType =
+        parentId?.let { accountDao.findById(it)?.type } ?: chosen
+
+    /**
+     * 상위로 둘 수 있는지. 카테고리와 같이 2뎁스까지만 쓴다.
+     * 하위가 있는 자산을 다른 자산 밑에 넣으면 3뎁스가 되고, 하위의 하위는 고를 화면이 없다.
+     */
+    private suspend fun validateParent(id: Long?, parentId: Long?): Throwable? {
+        parentId ?: return null
+        if (parentId == id) return IllegalArgumentException("자기 자신 아래에는 넣을 수 없습니다.")
+        val parent = accountDao.findById(parentId) ?: return IllegalStateException("상위 자산을 찾을 수 없습니다.")
+        if (!parent.isTopLevel) return IllegalArgumentException("하위 자산 아래에는 넣을 수 없습니다.")
+        if (id != null && accountDao.countChildren(id) > 0) {
+            return IllegalArgumentException("하위 자산이 있는 자산은 다른 자산 아래로 옮길 수 없습니다.")
+        }
+        return null
+    }
+
+    suspend fun accountChildCount(accountId: Long): Int = accountDao.countChildren(accountId)
 
     /**
      * 자산 삭제.
@@ -542,7 +591,7 @@ class LedgerRepository(
         if (accountDao.count() <= 1) {
             return Result.failure(IllegalStateException("자산이 하나뿐이라 지울 수 없습니다."))
         }
-        if (toId == null) accountDao.deleteById(id) else accountDao.deleteWithReassign(id, toId)
+        accountDao.deleteWithReassign(id, toId)
         return Result.success(Unit)
     }
 }

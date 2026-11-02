@@ -8,6 +8,7 @@ import androidx.room.Transaction
 import androidx.room.Update
 import com.hj0128.moneybook.data.local.entity.AccountEntity
 import com.hj0128.moneybook.data.model.AccountBalance
+import com.hj0128.moneybook.data.model.AccountType
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -22,6 +23,8 @@ interface AccountDao {
      *
      * 한도 사용액도 같은 이유로 여기서 계산한다. 주기가 자산마다 달라서(매월/매년)
      * 이번 달과 올해 범위를 둘 다 받아 자산별로 골라 쓴다.
+     *
+     * 순서는 화면에 놓이는 순서다. 상위 다음에 그 하위가 붙어 나온다.
      */
     @Query(
         """
@@ -32,6 +35,8 @@ interface AccountDao {
                a.initial_balance AS initial_balance,
                a.limit_amount AS limit_amount,
                a.limit_period AS limit_period,
+               a.parent_id AS parent_id,
+               a.sort_order AS sort_order,
                CASE WHEN a.limit_amount IS NULL THEN 0 ELSE IFNULL((
                    SELECT SUM(t.amount)
                    FROM transactions AS t
@@ -51,7 +56,11 @@ interface AccountDao {
                      FROM transactions AS t WHERE t.to_account_id = a.id
                    ), 0) AS balance
         FROM accounts AS a
-        ORDER BY a.sort_order ASC, a.id ASC
+        LEFT JOIN accounts AS p ON p.id = a.parent_id
+        ORDER BY COALESCE(p.sort_order, a.sort_order) ASC,
+                 COALESCE(a.parent_id, a.id) ASC,
+                 a.parent_id IS NOT NULL ASC,
+                 a.sort_order ASC, a.id ASC
         """
     )
     fun observeBalances(
@@ -138,8 +147,26 @@ interface AccountDao {
     @Query("DELETE FROM accounts WHERE id = :id")
     suspend fun deleteById(id: Long)
 
-    @Query("SELECT COALESCE(MAX(sort_order) + 1, 0) FROM accounts")
-    suspend fun nextSortOrder(): Int
+    /** 같은 부모 밑에서 맨 뒤에 붙일 정렬값. */
+    @Query(
+        """
+        SELECT COALESCE(MAX(sort_order) + 1, 0) FROM accounts
+        WHERE (:parentId IS NULL AND parent_id IS NULL) OR parent_id = :parentId
+        """
+    )
+    suspend fun nextSortOrder(parentId: Long?): Int
+
+    @Query("SELECT COUNT(*) FROM accounts WHERE parent_id = :accountId")
+    suspend fun countChildren(accountId: Long): Int
+
+    @Query("SELECT id FROM accounts WHERE parent_id = :accountId ORDER BY sort_order ASC, id ASC")
+    suspend fun childIds(accountId: Long): List<Long>
+
+    @Query("UPDATE accounts SET type = :type WHERE parent_id = :parentId")
+    suspend fun updateChildrenType(parentId: Long, type: AccountType)
+
+    @Query("UPDATE accounts SET parent_id = :parentId, type = :type, sort_order = :sortOrder WHERE id = :id")
+    suspend fun moveUnder(id: Long, parentId: Long, type: AccountType, sortOrder: Int)
 
     @Query("UPDATE accounts SET sort_order = :sortOrder WHERE id = :id")
     suspend fun updateSortOrder(id: Long, sortOrder: Int)
@@ -155,16 +182,35 @@ interface AccountDao {
      *
      * account_id 는 NOT NULL 이라 카테고리처럼 비워둘 수 없고, 외래키가 CASCADE 라
      * 그냥 지우면 그 자산의 거래가 함께 사라진다. 반드시 옮긴 뒤에 지운다.
+     *
+     * 하위 자산은 거래째로 [toId] 밑으로 옮긴다(CategoryDao.deleteWithReassign 과 같다).
+     * 하위 거래까지 [toId] 로 몰면 "A카드 결제"가 다른 카드 결제로 바뀌어 기록이 사실과 달라진다.
      */
     @Transaction
-    suspend fun deleteWithReassign(accountId: Long, toId: Long) {
+    suspend fun deleteWithReassign(accountId: Long, toId: Long?) {
+        if (toId == null) {
+            deleteById(accountId)
+            return
+        }
         deleteSelfTransfersAfterMove(accountId, toId)
         reassignOutgoing(accountId, toId)
         reassignIncoming(accountId, toId)
         deleteSelfRecurringAfterMove(accountId, toId)
         reassignRecurringOutgoing(accountId, toId)
         reassignRecurringIncoming(accountId, toId)
+        moveChildren(accountId, toId)
         deleteById(accountId)
+    }
+
+    /**
+     * 하위 자산을 [toParentId] 밑 맨 끝으로 옮긴다. 종류는 새 상위를 따른다.
+     *
+     * 부모 번호만 바꾸면 하위에서 쓰던 순서 번호(0,1..)가 새 상위의 하위 번호와 겹친다.
+     */
+    private suspend fun moveChildren(fromParentId: Long, toParentId: Long) {
+        val type = findById(toParentId)?.type ?: return
+        var next = nextSortOrder(toParentId)
+        childIds(fromParentId).forEach { moveUnder(it, toParentId, type, next++) }
     }
 
     @Insert

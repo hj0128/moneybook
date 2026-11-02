@@ -34,6 +34,7 @@ interface TransactionDao {
                t.category_id AS category_id,
                c.name AS category_name,
                c.color_argb AS category_color,
+               t.account_id AS account_id,
                a.name AS account_name,
                ta.name AS to_account_name,
                t.split_group_id AS split_group_id,
@@ -145,6 +146,7 @@ interface TransactionDao {
                t.category_id AS category_id,
                c.name AS category_name,
                c.color_argb AS category_color,
+               t.account_id AS account_id,
                a.name AS account_name,
                ta.name AS to_account_name,
                t.split_group_id AS split_group_id,
@@ -198,6 +200,7 @@ interface TransactionDao {
                NULL AS category_id,
                NULL AS category_name,
                NULL AS category_color,
+               t.account_id AS account_id,
                a.name AS account_name,
                ta.name AS to_account_name,
                t.split_group_id AS split_group_id,
@@ -222,20 +225,25 @@ interface TransactionDao {
      *
      * 줄 모양이 카테고리와 같아서 CategoryTotal 을 그대로 쓴다(category_id 자리에 자산 id).
      * 이체는 type 조건에서 빠진다. 자산 사이 이동이지 쓴 돈이 아니다.
+     * 하위 자산 거래는 상위로 합친다(A카드 + B카드 -> 체크카드). 카테고리 집계와 같은 규칙이다.
      */
     @Query(
         """
-        SELECT a.id AS category_id,
-               a.name AS name,
-               a.color_argb AS color_argb,
+        SELECT COALESCE(p.id, a.id) AS category_id,
+               COALESCE(p.name, a.name) AS name,
+               COALESCE(p.color_argb, a.color_argb) AS color_argb,
                SUM(t.amount) AS total,
                COUNT(t.id) AS entry_count,
-               a.sort_order AS sort_order
+               COALESCE(p.sort_order, a.sort_order) AS sort_order
         FROM transactions AS t
         INNER JOIN accounts AS a ON a.id = t.account_id
+        LEFT JOIN accounts AS p ON p.id = a.parent_id
         WHERE t.type = :type
           AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
-        GROUP BY a.id, a.name, a.color_argb, a.sort_order
+        GROUP BY COALESCE(p.id, a.id),
+                 COALESCE(p.name, a.name),
+                 COALESCE(p.color_argb, a.color_argb),
+                 COALESCE(p.sort_order, a.sort_order)
         ORDER BY total DESC
         """
     )
@@ -245,7 +253,7 @@ interface TransactionDao {
         endEpochDay: Long,
     ): Flow<List<CategoryTotal>>
 
-    /** 결제수단 상세용. 한 자산으로 낸(받은) 기간 내 내역을 최신순으로. */
+    /** 결제수단 상세용. 한 자산으로 낸(받은) 기간 내 내역을 최신순으로. 상위를 열면 하위 내역도 함께 나온다. */
     @Query(
         """
         SELECT t.id AS id,
@@ -257,6 +265,7 @@ interface TransactionDao {
                t.category_id AS category_id,
                c.name AS category_name,
                c.color_argb AS category_color,
+               t.account_id AS account_id,
                a.name AS account_name,
                ta.name AS to_account_name,
                t.split_group_id AS split_group_id,
@@ -265,7 +274,7 @@ interface TransactionDao {
         LEFT JOIN categories AS c ON c.id = t.category_id
         LEFT JOIN accounts AS a ON a.id = t.account_id
         LEFT JOIN accounts AS ta ON ta.id = t.to_account_id
-        WHERE t.account_id = :accountId
+        WHERE (t.account_id = :accountId OR a.parent_id = :accountId)
           AND t.type = :type
           AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
         ORDER BY t.date_epoch_day DESC, t.created_at DESC
@@ -310,6 +319,35 @@ interface TransactionDao {
     ): Flow<List<CategoryTotal>>
 
     /**
+     * 결제수단 상세의 하위 자산 breakdown. 카테고리 상세의 소분류 breakdown 과 같다.
+     *
+     * 상위에 직접 붙은 거래도 한 줄로 함께 나온다(하위를 만들기 전에 쌓인 내역).
+     */
+    @Query(
+        """
+        SELECT a.id AS category_id,
+               a.name AS name,
+               a.color_argb AS color_argb,
+               SUM(t.amount) AS total,
+               COUNT(t.id) AS entry_count,
+               a.sort_order AS sort_order
+        FROM transactions AS t
+        INNER JOIN accounts AS a ON a.id = t.account_id
+        WHERE (t.account_id = :accountId OR a.parent_id = :accountId)
+          AND t.type = :type
+          AND t.date_epoch_day BETWEEN :startEpochDay AND :endEpochDay
+        GROUP BY a.id, a.name, a.color_argb, a.sort_order
+        ORDER BY total DESC
+        """
+    )
+    fun observeAccountChildTotals(
+        accountId: Long,
+        type: TransactionType,
+        startEpochDay: Long,
+        endEpochDay: Long,
+    ): Flow<List<CategoryTotal>>
+
+    /**
      * 검색 대상 전체. 최신순.
      *
      * 걸러내기는 쿼리가 아니라 화면 쪽에서 한다. 여러 단어를 모두 포함하는지, "5,000원"을 금액으로 볼지 같은
@@ -326,6 +364,7 @@ interface TransactionDao {
                t.category_id AS category_id,
                c.name AS category_name,
                c.color_argb AS category_color,
+               t.account_id AS account_id,
                a.name AS account_name,
                ta.name AS to_account_name,
                t.split_group_id AS split_group_id,
@@ -350,6 +389,7 @@ interface TransactionDao {
                t.amount AS amount,
                COALESCE(p.name, c.name) AS parent_name,
                CASE WHEN p.id IS NULL THEN NULL ELSE c.name END AS child_name,
+               t.account_id AS account_id,
                a.name AS account_name,
                ta.name AS to_account_name,
                t.merchant AS merchant,

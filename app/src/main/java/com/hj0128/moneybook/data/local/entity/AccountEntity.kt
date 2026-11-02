@@ -2,12 +2,32 @@ package com.hj0128.moneybook.data.local.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.hj0128.moneybook.data.model.AccountType
 import com.hj0128.moneybook.data.model.PeriodUnit
 
-/** 자산(현금, 국민은행, 신한카드 ...). */
-@Entity(tableName = "accounts")
+/**
+ * 자산(현금, 국민은행, 신한카드 ...).
+ *
+ * 카테고리처럼 상위 아래에 하위를 둘 수 있다(체크카드 > A카드/B카드). 2뎁스까지만 쓴다.
+ * 카드마다 실적·한도가 따로라 카드를 한 장씩 자산으로 만들어야 하는데, 그러면 "체크카드로 얼마 썼지"를
+ * 손으로 더해야 한다. 상위 아래에 모으면 합계로 보인다.
+ */
+@Entity(
+    tableName = "accounts",
+    foreignKeys = [
+        ForeignKey(
+            entity = AccountEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["parent_id"],
+            // 상위가 사라지면 하위는 상위로 올라온다. 지워지는 것보다 낫다(카테고리와 같다).
+            onDelete = ForeignKey.SET_NULL,
+        ),
+    ],
+    indices = [Index("parent_id")],
+)
 data class AccountEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0L,
@@ -24,6 +44,7 @@ data class AccountEntity(
      */
     @ColumnInfo(name = "color_argb")
     val colorArgb: Int,
+    /** 같은 부모 아래에서의 순서. 상위끼리, 같은 상위의 하위끼리 따로 매긴다(카테고리와 같다). */
     @ColumnInfo(name = "sort_order")
     val sortOrder: Int = 0,
     /**
@@ -37,4 +58,9 @@ data class AccountEntity(
     /** 한도가 다시 차는 주기. 달력 기준(매월 1일 / 매년 1월 1일)이다. [limitAmount] 와 함께 있거나 함께 없다. */
     @ColumnInfo(name = "limit_period")
     val limitPeriod: PeriodUnit? = null,
-)
+    /** 상위 자산이면 null, 하위 자산이면 부모 자산 id. */
+    @ColumnInfo(name = "parent_id")
+    val parentId: Long? = null,
+) {
+    val isTopLevel: Boolean get() = parentId == null
+}

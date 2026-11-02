@@ -10,6 +10,7 @@ import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.LedgerPeriod
+import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.repository.LedgerRepository
 import java.time.LocalDate
@@ -79,6 +80,11 @@ data class CategoryDetailUiState(
      * 와 바로 맞대 볼 수 없다. 맞지 않는 막대를 보여주느니 고를 수 없게 둔다.
      */
     val breakdownFiltersTrend: Boolean = true,
+    /**
+     * 소계 줄이 하위 자산인지. 그러면 내역을 카테고리가 아니라 자산으로 걸러야 한다.
+     * 상위 자산 상세가 카테고리 상세의 소분류처럼 하위 자산으로 쪼개 보여줄 때 쓴다.
+     */
+    val breakdownByAccount: Boolean = false,
     /** 결제수단 상세일 때 그 자산. 한도 막대를 그리는 데 쓴다. */
     val account: AccountBalance? = null,
     /** 대분류 지출 카테고리의 한 달 예산. 한 달을 볼 때만 막대를 그린다. */
@@ -140,6 +146,9 @@ data class CategoryDetailUiState(
         else -> 12
     }
 
+    /** 소계 줄 하나에 속하는지 볼 때 쓰는 값. 하위 자산으로 쪼갰으면 자산, 아니면 카테고리. */
+    private fun TransactionDetail.breakdownKey(): Long? = if (breakdownByAccount) accountId else categoryId
+
     /** 년 단위는 달별, 월 단위는 주별 막대. 어느 쪽이든 보고 있는 기간 안만 쪼갠다. */
     val showsTrend: Boolean get() = !isEmpty
 
@@ -165,7 +174,7 @@ data class CategoryDetailUiState(
             fun weekOf(day: Int) = (day - 1 + offset) / 7
             val byWeek = groups
                 .flatMap { it.items }
-                .filter { childId == null || it.categoryId == childId }
+                .filter { childId == null || it.breakdownKey() == childId }
                 .groupBy { weekOf(it.date.dayOfMonth) }
                 .mapValues { (_, items) -> items.sumOf { it.amount } }
             (0..weekOf(days)).map { week ->
@@ -192,7 +201,7 @@ data class CategoryDetailUiState(
         val byMonth = groups
             .flatMap { it.items }
             // childId 가 있으면 그 소분류(또는 대분류에 직접 붙은 건)만 센다.
-            .filter { childId == null || it.categoryId == childId }
+            .filter { childId == null || it.breakdownKey() == childId }
             .groupBy { it.date.monthValue }
             .mapValues { (_, items) -> items.sumOf { it.amount } }
         return (1..12).map { byMonth[it] ?: 0L }
@@ -208,7 +217,7 @@ data class CategoryDetailUiState(
         if (childId == null) return groups
         return groups
             .flatMap { it.items }
-            .filter { it.categoryId == childId }
+            .filter { it.breakdownKey() == childId }
             .toDayGroups()
     }
 
@@ -273,18 +282,25 @@ class CategoryDetailViewModel(
 
         is DetailSource.Account -> combine(
             repository.observeAccountTransactions(period, source.id, source.type),
-            repository.observeAccount(source.id),
+            repository.observeAccountTree(),
             repository.observeAccountCategoryTotals(period, source.id, source.type),
-        ) { items, account, categoryTotals ->
+            repository.observeAccountChildTotals(period, source.id, source.type),
+        ) { items, nodes, categoryTotals, childTotals ->
+            val node = nodes.firstOrNull { it.account.id == source.id }
+            val account = node?.account ?: nodes.flatMap { it.children }.firstOrNull { it.id == source.id }
+            // 하위 자산이 있으면 카테고리 상세의 소분류처럼 하위 자산으로 쪼갠다.
+            // 없으면 예전처럼 카테고리로 쪼갠다("복지포인트로 무엇을 샀나").
+            val byChild = node?.hasChildren == true
             CategoryDetailUiState(
                 period = period,
                 categoryName = account?.name ?: "삭제된 자산",
                 categoryColor = account?.colorArgb,
                 type = source.type,
                 groups = items.toDayGroups(),
-                childTotals = categoryTotals,
-                breakdownLabel = "카테고리",
-                breakdownFiltersTrend = false,
+                childTotals = if (byChild) childTotals else categoryTotals,
+                breakdownLabel = if (byChild) "하위 자산" else "카테고리",
+                breakdownFiltersTrend = byChild,
+                breakdownByAccount = byChild,
                 account = account,
             )
         }
