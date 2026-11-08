@@ -69,7 +69,23 @@ data class EntryUiState(
      * 31일짜리의 다음 날짜는 11월 30일일 수 있다. 날짜에서 다시 읽으면 손대지 않고 저장만 해도 30일로 바뀐다.
      */
     val keptAnchor: LocalDate? = null,
+    /** 이 내역만 카드 실적에서 뺄지. 실적 목표가 있는 결제수단으로 지출할 때만 고른다. */
+    val excludedFromPerformance: Boolean = false,
 ) {
+    /**
+     * "실적에서 빼기"를 보여줄지. 실적이 없는 결제수단에서는 뜻이 없다.
+     * 나눈 결제는 줄마다 따로 고르므로 [partShowsPerformanceToggle] 를 쓴다.
+     * 고정 지출이면 앞으로 넣을 내역마다 붙는다.
+     */
+    val showsPerformanceToggle: Boolean
+        get() = type == TransactionType.EXPENSE && !isSplit && hasPerformance(selectedAccountId)
+
+    fun partShowsPerformanceToggle(index: Int): Boolean =
+        type == TransactionType.EXPENSE && hasPerformance(parts.getOrNull(index)?.accountId)
+
+    private fun hasPerformance(accountId: Long?): Boolean =
+        accounts.firstOrNull { it.id == accountId }?.hasPerformance == true
+
     /** 주기를 정하는 날. 매주면 이 날의 요일, 매월이면 일, 매년이면 월·일. */
     val repeatAnchor: LocalDate get() = keptAnchor ?: date
 
@@ -174,7 +190,9 @@ class EntryViewModel(
                     type = entity.type,
                     amountText = all.sumOf { it.amount }.toString(),
                     parts = if (split) {
-                        all.map { SplitPart(it.categoryId, it.accountId, it.amount.toString(), it.memo) }
+                        all.map {
+                            SplitPart(it.categoryId, it.accountId, it.amount.toString(), it.memo, it.excludedFromPerformance)
+                        }
                     } else {
                         emptyList()
                     },
@@ -185,6 +203,7 @@ class EntryViewModel(
                     selectedCategoryId = entity.categoryId,
                     selectedAccountId = entity.accountId,
                     selectedToAccountId = entity.toAccountId,
+                    excludedFromPerformance = entity.excludedFromPerformance,
                 )
             }
             // 종류가 지출이 아니면 그 종류의 카테고리를 다시 구독해야 한다.
@@ -213,6 +232,7 @@ class EntryViewModel(
                     selectedToAccountId = rule.toAccountId,
                     repeatUnit = rule.repeatUnit,
                     keptAnchor = rule.anchor,
+                    excludedFromPerformance = rule.excludedFromPerformance,
                 )
             }
             if (rule.type != TransactionType.EXPENSE) observeCategories(rule.type)
@@ -324,7 +344,12 @@ class EntryViewModel(
             state.copy(
                 // 적어 둔 메모는 첫 줄로 옮긴다. 나누는 동안 위쪽 메모 칸은 감춰진다.
                 parts = listOf(
-                    SplitPart(state.selectedCategoryId, state.selectedAccountId, memo = state.memo),
+                    SplitPart(
+                        state.selectedCategoryId,
+                        state.selectedAccountId,
+                        memo = state.memo,
+                        excludedFromPerformance = state.excludedFromPerformance,
+                    ),
                     SplitPart(null, state.selectedAccountId),
                 ),
                 keypadTarget = 0,
@@ -361,6 +386,7 @@ class EntryViewModel(
                     selectedCategoryId = last?.categoryId ?: state.selectedCategoryId,
                     selectedAccountId = last?.accountId ?: state.selectedAccountId,
                     memo = last?.memo ?: state.memo,
+                    excludedFromPerformance = last?.excludedFromPerformance ?: state.excludedFromPerformance,
                 )
             }
         }
@@ -375,6 +401,12 @@ class EntryViewModel(
     fun selectPartAccount(index: Int, id: Long) {
         _uiState.update { state ->
             state.copy(parts = state.parts.updated(index) { it.copy(accountId = id) }, errorMessage = null)
+        }
+    }
+
+    fun setPartExcludedFromPerformance(index: Int, excluded: Boolean) {
+        _uiState.update { state ->
+            state.copy(parts = state.parts.updated(index) { it.copy(excludedFromPerformance = excluded) })
         }
     }
 
@@ -420,6 +452,10 @@ class EntryViewModel(
 
     fun updateMemo(memo: String) {
         _uiState.update { it.copy(memo = memo) }
+    }
+
+    fun setExcludedFromPerformance(excluded: Boolean) {
+        _uiState.update { it.copy(excludedFromPerformance = excluded) }
     }
 
     /** 총액을 눌렀을 때. */
@@ -477,6 +513,8 @@ class EntryViewModel(
                     date = state.date,
                     merchant = state.merchant,
                     memo = state.memo,
+                    // 실적 없는 카드로 바꿨으면 켜 둔 값은 뜻이 없다. 남겨 두면 나중에 실적을 켰을 때 빠져 있다.
+                    excludedFromPerformance = state.excludedFromPerformance && state.showsPerformanceToggle,
                 )
                     .onSuccess { _uiState.update { it.copy(isSaved = true) } }
                     .onFailure { error ->
@@ -497,6 +535,7 @@ class EntryViewModel(
                     merchant = state.merchant,
                     memo = state.memo,
                     nowMillis = System.currentTimeMillis(),
+                    excludedFromPerformance = state.excludedFromPerformance && state.showsPerformanceToggle,
                 )
             }.onSuccess {
                 _uiState.update { it.copy(isSaved = true) }
@@ -520,6 +559,7 @@ class EntryViewModel(
                 anchor = state.repeatAnchor,
                 merchant = state.merchant,
                 memo = state.memo,
+                excludedFromPerformance = state.excludedFromPerformance && state.showsPerformanceToggle,
             )
                 .onSuccess { _uiState.update { it.copy(isSaved = true) } }
                 .onFailure { error ->
@@ -537,6 +577,7 @@ class EntryViewModel(
                     categoryId = requireNotNull(part.categoryId),
                     accountId = requireNotNull(part.accountId),
                     memo = part.memo,
+                    excludedFromPerformance = part.excludedFromPerformance && state.partShowsPerformanceToggle(index),
                 )
             }
         } else {
@@ -546,6 +587,7 @@ class EntryViewModel(
                     categoryId = requireNotNull(state.selectedCategoryId),
                     accountId = requireNotNull(state.selectedAccountId),
                     memo = state.memo,
+                    excludedFromPerformance = state.excludedFromPerformance && state.showsPerformanceToggle,
                 )
             )
         }
@@ -611,6 +653,7 @@ data class SplitPart(
     val accountId: Long?,
     val amountText: String = "",
     val memo: String = "",
+    val excludedFromPerformance: Boolean = false,
 ) {
     val amount: Long get() = amountText.toLongOrNull() ?: 0L
 }

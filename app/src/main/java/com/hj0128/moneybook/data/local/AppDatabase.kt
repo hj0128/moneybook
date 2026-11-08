@@ -15,6 +15,7 @@ import com.hj0128.moneybook.data.local.dao.TransactionDao
 import com.hj0128.moneybook.data.local.entity.AccountEntity
 import com.hj0128.moneybook.data.local.entity.BudgetEntity
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
+import com.hj0128.moneybook.data.local.entity.PerformanceExclusionEntity
 import com.hj0128.moneybook.data.local.entity.RecurringEntity
 import com.hj0128.moneybook.data.local.entity.TransactionEntity
 
@@ -25,6 +26,7 @@ import com.hj0128.moneybook.data.local.entity.TransactionEntity
         AccountEntity::class,
         RecurringEntity::class,
         BudgetEntity::class,
+        PerformanceExclusionEntity::class,
     ],
     version = AppDatabase.VERSION,
     exportSchema = true,
@@ -42,7 +44,7 @@ abstract class AppDatabase : RoomDatabase() {
         const val DB_NAME = "household.db"
 
         /** 백업을 복원할 때 이보다 새 버전에서 만든 파일은 받지 않는다(내려가는 마이그레이션이 없다). */
-        const val VERSION = 9
+        const val VERSION = 10
 
         @Volatile
         private var instance: AppDatabase? = null
@@ -54,7 +56,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                 // 외래키 제약을 실제로 켜준다(Room 은 기본으로 켜지 않는다).
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -210,5 +212,35 @@ internal val MIGRATION_8_9 = object : Migration(8, 9) {
                 "REFERENCES `accounts`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL"
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_accounts_parent_id` ON `accounts` (`parent_id`)")
+    }
+}
+
+/**
+ * v10: 카드 실적. 자산에 실적 목표 칸 둘, 실적에서 뺄 카테고리를 적는 표,
+ * 내역 하나(와 고정 지출이 넣을 내역)를 실적에서 빼는 칸을 더한다.
+ *
+ * null 을 허용하는 칸과 새 표라 기존 자산은 실적 없음으로 남는다. 표 만드는 SQL 은 Room 이 내보낸 스키마와 같아야 한다.
+ */
+internal val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `accounts` ADD COLUMN `performance_target` INTEGER")
+        db.execSQL("ALTER TABLE `accounts` ADD COLUMN `performance_period` TEXT")
+        db.execSQL(
+            "ALTER TABLE `transactions` ADD COLUMN `excluded_from_performance` INTEGER NOT NULL DEFAULT 0"
+        )
+        db.execSQL(
+            "ALTER TABLE `recurring` ADD COLUMN `excluded_from_performance` INTEGER NOT NULL DEFAULT 0"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `account_performance_exclusions` (" +
+                "`account_id` INTEGER NOT NULL, `category_id` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`account_id`, `category_id`), " +
+                "FOREIGN KEY(`account_id`) REFERENCES `accounts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , " +
+                "FOREIGN KEY(`category_id`) REFERENCES `categories`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_account_performance_exclusions_category_id` " +
+                "ON `account_performance_exclusions` (`category_id`)"
+        )
     }
 }

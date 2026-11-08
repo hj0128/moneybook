@@ -57,6 +57,9 @@ import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.UncategorizedTotal
 import com.hj0128.moneybook.ui.common.UsageGauge
+import com.hj0128.moneybook.ui.common.limitSummary
+import com.hj0128.moneybook.ui.common.performanceSummary
+import com.hj0128.moneybook.ui.common.remainingWord
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatWon
 import androidx.compose.ui.graphics.Color
@@ -351,7 +354,7 @@ private fun UncategorizedRow(
 }
 
 /**
- * 한도 자산 줄 아래의 한 줄. "올해 남은 380,000원 / 1,000,000원".
+ * 한도 자산 줄 아래의 한 줄. "올해 한도 380,000원 남음".
  *
  * 오른쪽 금액은 다른 줄처럼 고른 기간에 쓴 돈이고, 이 줄은 기간과 상관없이 늘 지금
  * 주기(올해/이번 달) 기준이다. 지난 달을 보고 있어도 "지금 얼마 남았나"가 궁금하기 때문이다.
@@ -359,18 +362,32 @@ private fun UncategorizedRow(
  */
 @Composable
 private fun LimitNote(account: AccountBalance) {
-    val limit = account.limitAmount ?: return
+    if (!account.hasLimit) return
     val over = account.limitRemaining < 0
-    val text = if (over) {
-        "${account.limitPeriodLabel} 초과 ${(-account.limitRemaining).formatWon()} / ${limit.formatWon()}"
-    } else {
-        "${account.limitPeriodLabel} 남은 ${account.limitRemaining.formatWon()} / ${limit.formatWon()}"
-    }
+    val text = limitSummary(account)
     Text(
         text = text,
         style = MaterialTheme.typography.bodySmall,
         // 넘겼을 때만 지출 색. 평소에는 보조 글씨라 눈에 띄지 않아야 한다.
         color = if (over) LocalLedgerColors.current.expense else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 20.dp, top = 2.dp),
+    )
+}
+
+/**
+ * 실적 자산 줄 아래의 한 줄. "이번 달 실적 120,000원 남음 · 지난달 달성".
+ *
+ * 한도 줄처럼 고른 기간과 상관없이 늘 지금 주기 기준이다.
+ */
+@Composable
+private fun PerformanceNote(account: AccountBalance) {
+    if (!account.hasPerformance) return
+    val now = performanceSummary(account)
+    val prev = "${account.performancePrevLabel} ${if (account.performancePrevAchieved) "달성" else "미달"}"
+    Text(
+        text = "$now · $prev",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(start = 20.dp, top = 2.dp),
     )
 }
@@ -411,11 +428,7 @@ private fun BudgetCard(state: CategoryUiState, onClick: () -> Unit) {
 private fun BudgetNote(spent: Long, budget: Long) {
     val remaining = budget - spent
     val over = remaining < 0
-    val text = if (over) {
-        "예산 초과 ${(-remaining).formatWon()} / ${budget.formatWon()}"
-    } else {
-        "예산 남은 ${remaining.formatWon()} / ${budget.formatWon()}"
-    }
+    val text = "예산 ${remainingWord(remaining)}"
     Text(
         text = text,
         style = MaterialTheme.typography.bodySmall,
@@ -477,7 +490,10 @@ private fun CategoryRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        limit?.let { LimitNote(it) }
+        limit?.let {
+            LimitNote(it)
+            PerformanceNote(it)
+        }
         budget?.let { BudgetNote(spent = item.total, budget = it) }
         Spacer(Modifier.height(6.dp))
         // 비중 막대는 카테고리 색을 그대로 쓴다. 목록의 색 점과 같은 색이라 눈으로 잇기 쉽다.

@@ -87,6 +87,11 @@ data class CategoryDetailUiState(
     val breakdownByAccount: Boolean = false,
     /** 결제수단 상세일 때 그 자산. 한도 막대를 그리는 데 쓴다. */
     val account: AccountBalance? = null,
+    /**
+     * 상위 자산 상세일 때 한도나 실적이 걸린 하위 자산.
+     * 실적은 카드 한 장마다 따로라, 체크카드 상세를 열면 A카드·B카드 막대가 각각 보여야 한다.
+     */
+    val childGauges: List<AccountBalance> = emptyList(),
     /** 대분류 지출 카테고리의 한 달 예산. 한 달을 볼 때만 막대를 그린다. */
     val budget: Long? = null,
 ) {
@@ -302,6 +307,7 @@ class CategoryDetailViewModel(
                 breakdownFiltersTrend = byChild,
                 breakdownByAccount = byChild,
                 account = account,
+                childGauges = node?.children.orEmpty().filter { it.hasLimit || it.hasPerformance },
             )
         }
 

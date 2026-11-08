@@ -116,7 +116,7 @@ data class CategoryUiState(
     val period: LedgerPeriod,
     val type: TransactionType = TransactionType.EXPENSE,
     val basis: BreakdownBasis = BreakdownBasis.CATEGORY,
-    /** 한도가 걸린 결제수단. 결제수단 기준으로 지출을 볼 때 그 줄 아래에 남은 금액을 적는다. */
+    /** 한도나 실적이 걸린 결제수단. 결제수단 기준으로 지출을 볼 때 그 줄 아래에 남은 금액을 적는다. */
     val limitAccounts: List<AccountBalance> = emptyList(),
     val totals: List<CategoryTotal> = emptyList(),
     /** 카테고리가 빠진 거래. 0건이면 화면에 내지 않는다. */
@@ -275,7 +275,7 @@ class LedgerViewModel(
                             period = period,
                             type = type,
                             basis = basis,
-                            limitAccounts = accounts.filter { it.hasLimit },
+                            limitAccounts = accounts.filter { it.hasLimit || it.hasPerformance },
                             totals = totals.sortedBy(sortOrder),
                             sortOrder = sortOrder,
                         )

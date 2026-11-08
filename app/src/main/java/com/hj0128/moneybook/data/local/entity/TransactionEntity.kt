@@ -93,4 +93,11 @@ data class TransactionEntity(
      */
     @ColumnInfo(name = "recurring_id")
     val recurringId: Long? = null,
+    /**
+     * 이 내역 하나만 카드 실적에서 뺀다.
+     *
+     * 카테고리째 빼기로는 안 되는 결제가 있다. 같은 "마트"여도 상품권을 산 날만 실적이 안 잡힌다.
+     */
+    @ColumnInfo(name = "excluded_from_performance", defaultValue = "0")
+    val excludedFromPerformance: Boolean = false,
 )

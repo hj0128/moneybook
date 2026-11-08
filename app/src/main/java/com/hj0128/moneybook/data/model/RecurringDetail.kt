@@ -26,6 +26,8 @@ data class RecurringDetail(
     val accountName: String?,
     @ColumnInfo(name = "to_account_name")
     val toAccountName: String?,
+    @ColumnInfo(name = "excluded_from_performance")
+    val excludedFromPerformance: Boolean = false,
 ) {
     val nextDate: LocalDate get() = LocalDate.ofEpochDay(nextEpochDay)
 
@@ -57,6 +59,7 @@ data class RecurringDetail(
         get() = if (type == TransactionType.TRANSFER) {
             "이체"
         } else {
-            listOfNotNull(categoryLabel, accountName).joinToString(" | ")
+            listOfNotNull(categoryLabel, accountName).joinToString(" | ") +
+                if (excludedFromPerformance) " · 실적 제외" else ""
         }
 }

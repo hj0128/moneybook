@@ -9,7 +9,10 @@ import com.hj0128.moneybook.appContainer
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.AccountNode
 import com.hj0128.moneybook.data.model.AccountType
+import com.hj0128.moneybook.data.model.CategoryNode
+import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.repository.AccountLimit
+import com.hj0128.moneybook.data.repository.AccountPerformance
 import com.hj0128.moneybook.data.repository.LedgerRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -27,8 +30,11 @@ sealed interface AccountEditTarget {
     /** [parent] 밑에 새 하위 자산. */
     data class NewChild(val parent: AccountBalance) : AccountEditTarget
 
-    /** 기존 자산 수정. */
-    data class Edit(val account: AccountBalance) : AccountEditTarget
+    /** 기존 자산 수정. [excludedCategoryIds] 는 저장된 "실적에서 뺄 카테고리"다. */
+    data class Edit(
+        val account: AccountBalance,
+        val excludedCategoryIds: Set<Long> = emptySet(),
+    ) : AccountEditTarget
 }
 
 /**
@@ -82,6 +88,14 @@ class AccountManagerViewModel(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = null,
+        )
+
+    /** 실적에서 뺄 카테고리를 고를 때 보여 줄 지출 카테고리. 실적은 쓴 돈만 세니 수입 카테고리는 없다. */
+    val expenseCategories: StateFlow<List<CategoryNode>> =
+        repository.observeCategoryTree(TransactionType.EXPENSE).stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
         )
 
     private val _editTarget = MutableStateFlow<AccountEditTarget?>(null)
@@ -142,7 +156,12 @@ class AccountManagerViewModel(
     }
 
     fun startEdit(account: AccountBalance) {
-        _editTarget.value = AccountEditTarget.Edit(account)
+        viewModelScope.launch {
+            _editTarget.value = AccountEditTarget.Edit(
+                account = account,
+                excludedCategoryIds = repository.performanceExclusions(account.id),
+            )
+        }
     }
 
     fun dismissEdit() {
@@ -161,18 +180,21 @@ class AccountManagerViewModel(
         initialBalance: Long,
         limit: AccountLimit?,
         parentId: Long?,
+        performance: AccountPerformance?,
     ) {
         val target = _editTarget.value ?: return
         viewModelScope.launch {
             val result = when (target) {
-                AccountEditTarget.NewTopLevel ->
-                    repository.addAccount(name, type, colorArgb, initialBalance, limit, parentId = null).map { }
+                AccountEditTarget.NewTopLevel -> repository.addAccount(
+                    name, type, colorArgb, initialBalance, limit, parentId = null, performance = performance,
+                ).map { }
 
-                is AccountEditTarget.NewChild ->
-                    repository.addAccount(name, type, colorArgb, initialBalance, limit, target.parent.id).map { }
+                is AccountEditTarget.NewChild -> repository.addAccount(
+                    name, type, colorArgb, initialBalance, limit, target.parent.id, performance,
+                ).map { }
 
                 is AccountEditTarget.Edit -> repository.updateAccount(
-                    target.account.id, name, type, colorArgb, initialBalance, limit, parentId,
+                    target.account.id, name, type, colorArgb, initialBalance, limit, parentId, performance,
                 )
             }
             result

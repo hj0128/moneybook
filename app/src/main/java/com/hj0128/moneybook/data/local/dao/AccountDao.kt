@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import com.hj0128.moneybook.data.local.entity.AccountEntity
+import com.hj0128.moneybook.data.local.entity.PerformanceExclusionEntity
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.AccountType
 import kotlinx.coroutines.flow.Flow
@@ -23,6 +24,10 @@ interface AccountDao {
      *
      * 한도 사용액도 같은 이유로 여기서 계산한다. 주기가 자산마다 달라서(매월/매년)
      * 이번 달과 올해 범위를 둘 다 받아 자산별로 골라 쓴다.
+     *
+     * 실적은 지금 주기와 바로 전 주기를 함께 센다. 혜택은 보통 지난달 실적으로 정해져서
+     * 이번 달 진행만 보여 주면 "지금 혜택을 받고 있나"를 알 수 없다.
+     * 실적에서 뺄 카테고리(소분류면 그 대분류가 빠진 경우도)에 붙은 지출과, 하나씩 뺀 내역은 세지 않는다.
      *
      * 순서는 화면에 놓이는 순서다. 상위 다음에 그 하위가 붙어 나온다.
      */
@@ -46,6 +51,40 @@ interface AccountDao {
                          (CASE a.limit_period WHEN 'YEAR' THEN :yearStart ELSE :monthStart END)
                          AND (CASE a.limit_period WHEN 'YEAR' THEN :yearEnd ELSE :monthEnd END)
                ), 0) END AS limit_used,
+               a.performance_target AS performance_target,
+               a.performance_period AS performance_period,
+               CASE WHEN a.performance_target IS NULL THEN 0 ELSE IFNULL((
+                   SELECT SUM(t.amount)
+                   FROM transactions AS t
+                   LEFT JOIN categories AS c ON c.id = t.category_id
+                   WHERE t.account_id = a.id
+                     AND t.type = 'EXPENSE'
+                     AND t.date_epoch_day BETWEEN
+                         (CASE a.performance_period WHEN 'YEAR' THEN :yearStart ELSE :monthStart END)
+                         AND (CASE a.performance_period WHEN 'YEAR' THEN :yearEnd ELSE :monthEnd END)
+                     AND t.excluded_from_performance = 0
+                     AND NOT EXISTS (
+                         SELECT 1 FROM account_performance_exclusions AS e
+                         WHERE e.account_id = a.id
+                           AND (e.category_id = t.category_id OR e.category_id = c.parent_id)
+                     )
+               ), 0) END AS performance_used,
+               CASE WHEN a.performance_target IS NULL THEN 0 ELSE IFNULL((
+                   SELECT SUM(t.amount)
+                   FROM transactions AS t
+                   LEFT JOIN categories AS c ON c.id = t.category_id
+                   WHERE t.account_id = a.id
+                     AND t.type = 'EXPENSE'
+                     AND t.date_epoch_day BETWEEN
+                         (CASE a.performance_period WHEN 'YEAR' THEN :prevYearStart ELSE :prevMonthStart END)
+                         AND (CASE a.performance_period WHEN 'YEAR' THEN :prevYearEnd ELSE :prevMonthEnd END)
+                     AND t.excluded_from_performance = 0
+                     AND NOT EXISTS (
+                         SELECT 1 FROM account_performance_exclusions AS e
+                         WHERE e.account_id = a.id
+                           AND (e.category_id = t.category_id OR e.category_id = c.parent_id)
+                     )
+               ), 0) END AS performance_prev,
                a.initial_balance
                  + IFNULL((
                      SELECT SUM(CASE t.type WHEN 'INCOME' THEN t.amount ELSE -t.amount END)
@@ -68,7 +107,27 @@ interface AccountDao {
         monthEnd: Long,
         yearStart: Long,
         yearEnd: Long,
+        prevMonthStart: Long,
+        prevMonthEnd: Long,
+        prevYearStart: Long,
+        prevYearEnd: Long,
     ): Flow<List<AccountBalance>>
+
+    @Query("SELECT category_id FROM account_performance_exclusions WHERE account_id = :accountId")
+    suspend fun excludedCategoryIds(accountId: Long): List<Long>
+
+    @Query("DELETE FROM account_performance_exclusions WHERE account_id = :accountId")
+    suspend fun clearExclusions(accountId: Long)
+
+    @Insert
+    suspend fun insertExclusions(rows: List<PerformanceExclusionEntity>)
+
+    /** 뺄 카테고리를 통째로 바꾼다. 하나씩 넣고 빼는 것보다 수정 창의 체크 상태를 그대로 옮기기 쉽다. */
+    @Transaction
+    suspend fun replaceExclusions(accountId: Long, categoryIds: Set<Long>) {
+        clearExclusions(accountId)
+        insertExclusions(categoryIds.map { PerformanceExclusionEntity(accountId, it) })
+    }
 
     @Query("SELECT * FROM accounts WHERE id = :id")
     suspend fun findById(id: Long): AccountEntity?

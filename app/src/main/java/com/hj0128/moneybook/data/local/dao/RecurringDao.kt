@@ -29,7 +29,8 @@ interface RecurringDao {
                p.name AS parent_category_name,
                c.color_argb AS category_color,
                a.name AS account_name,
-               ta.name AS to_account_name
+               ta.name AS to_account_name,
+               r.excluded_from_performance AS excluded_from_performance
         FROM recurring AS r
         LEFT JOIN categories AS c ON c.id = r.category_id
         LEFT JOIN categories AS p ON p.id = c.parent_id

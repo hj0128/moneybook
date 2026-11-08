@@ -70,6 +70,12 @@ data class RecurringEntity(
     val nextEpochDay: Long,
     @ColumnInfo(name = "created_at")
     val createdAt: Long,
+    /**
+     * 넣는 내역마다 "실적 제외"를 붙인다. 카드로 자동이체하는 통신비·관리비는 카드사가 실적으로 쳐 주지 않는 경우가 많다.
+     * 고쳐도 이미 넣은 내역은 그대로다(다른 칸과 같다).
+     */
+    @ColumnInfo(name = "excluded_from_performance", defaultValue = "0")
+    val excludedFromPerformance: Boolean = false,
 ) {
     val nextDate: LocalDate get() = LocalDate.ofEpochDay(nextEpochDay)
 
@@ -89,5 +95,6 @@ data class RecurringEntity(
         memo = memo,
         createdAt = nowMillis,
         recurringId = id,
+        excludedFromPerformance = excludedFromPerformance,
     )
 }

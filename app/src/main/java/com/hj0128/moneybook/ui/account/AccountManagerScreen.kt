@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -67,9 +68,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.AccountNode
 import com.hj0128.moneybook.data.model.AccountType
+import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.repository.AccountLimit
+import com.hj0128.moneybook.data.repository.AccountPerformance
 import com.hj0128.moneybook.ui.common.LimitGauge
+import com.hj0128.moneybook.ui.common.PerformanceGauge
 import com.hj0128.moneybook.ui.common.ReorderableList
 import com.hj0128.moneybook.ui.theme.CategoryPalette
 import com.hj0128.moneybook.ui.theme.paletteColorOrDefault
@@ -100,6 +104,7 @@ fun AccountManagerScreen(
     val deleteTarget by viewModel.deleteTarget.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
     val reorderDraft by viewModel.reorderDraft.collectAsStateWithLifecycle()
+    val expenseCategories by viewModel.expenseCategories.collectAsStateWithLifecycle()
 
     // 뒤로가기는 한 겹씩만 벗긴다. 순서 변경 중이면 모드만 끝내고, 하위를 보는 중이면 상위 목록으로.
     BackHandler(enabled = reorderDraft != null) { viewModel.stopReorder() }
@@ -227,6 +232,7 @@ fun AccountManagerScreen(
     editTarget?.let { target ->
         AccountEditDialog(
             target = target,
+            expenseCategories = expenseCategories,
             errorMessage = errorMessage,
             onDismiss = viewModel::dismissEdit,
             onSubmit = viewModel::submitEdit,
@@ -358,13 +364,19 @@ private fun ChildRow(
 }
 
 /**
- * 한도 막대. 버튼 아래까지 넓게 쓴다. 버튼 옆 좁은 칸에 넣으면 "남은 X원"이 잘린다.
+ * 한도·실적 막대. 버튼 아래까지 넓게 쓴다. 버튼 옆 좁은 칸에 넣으면 "X원 남음"이 잘린다.
  * 이름 글자가 시작하는 자리(여백 16 + 점 12 + 간격 12)에 맞춘다.
  */
 @Composable
 private fun LimitBar(account: AccountBalance) {
     if (account.hasLimit) {
         LimitGauge(
+            account = account,
+            modifier = Modifier.padding(start = 40.dp, end = 16.dp, bottom = 12.dp),
+        )
+    }
+    if (account.hasPerformance) {
+        PerformanceGauge(
             account = account,
             modifier = Modifier.padding(start = 40.dp, end = 16.dp, bottom = 12.dp),
         )
@@ -441,6 +453,7 @@ private fun EmptyChildren(parentName: String) {
 @Composable
 private fun AccountEditDialog(
     target: AccountEditTarget,
+    expenseCategories: List<CategoryNode>,
     errorMessage: String?,
     onDismiss: () -> Unit,
     onSubmit: (
@@ -450,6 +463,7 @@ private fun AccountEditDialog(
         initialBalance: Long,
         limit: AccountLimit?,
         parentId: Long?,
+        performance: AccountPerformance?,
     ) -> Unit,
     onErrorShown: () -> Unit,
 ) {
@@ -467,6 +481,14 @@ private fun AccountEditDialog(
     // null 이면 한도 없음. 대부분의 자산은 한도가 없어서 기본값도 없음이다.
     var limitPeriod by remember(target) { mutableStateOf(existing?.limitPeriod) }
     var limitText by remember(target) { mutableStateOf(existing?.limitAmount?.toString().orEmpty()) }
+    var performancePeriod by remember(target) { mutableStateOf(existing?.performancePeriod) }
+    var performanceText by remember(target) {
+        mutableStateOf(existing?.performanceTarget?.toString().orEmpty())
+    }
+    var excluded by remember(target) {
+        mutableStateOf((target as? AccountEditTarget.Edit)?.excludedCategoryIds.orEmpty())
+    }
+    var pickingExclusions by remember(target) { mutableStateOf(false) }
     // 상위는 수정 창에서 바꾸지 않는다. 카테고리 소분류처럼 들어온 자리가 곧 자리다.
     val parentId = existing?.parentId
 
@@ -543,7 +565,7 @@ private fun AccountEditDialog(
                 )
 
                 Spacer(Modifier.height(16.dp))
-                DialogLabel("사용 한도")
+                DialogLabel("한도")
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                     limitOptions.forEachIndexed { index, option ->
                         SegmentedButton(
@@ -564,14 +586,52 @@ private fun AccountEditDialog(
                         supportingText = {
                             Text(
                                 when (limitPeriod) {
-                                    PeriodUnit.YEAR -> "매년 1월 1일에 사용액이 0부터 다시 셉니다."
-                                    else -> "매월 1일에 사용액이 0부터 다시 셉니다."
+                                    PeriodUnit.YEAR -> "매년 1월 1일에 0부터 다시 셉니다."
+                                    else -> "매월 1일에 0부터 다시 셉니다."
                                 }
                             )
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                // 실적은 한도와 따로 정한다. 복지카드처럼 한도가 있으면서 실적도 채워야 하는 카드가 있다.
+                Spacer(Modifier.height(16.dp))
+                DialogLabel("실적")
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    limitOptions.forEachIndexed { index, option ->
+                        SegmentedButton(
+                            selected = option == performancePeriod,
+                            onClick = { performancePeriod = option },
+                            shape = SegmentedButtonDefaults.itemShape(index, limitOptions.size),
+                        ) {
+                            Text(option.limitLabel())
+                        }
+                    }
+                }
+                if (performancePeriod != null) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = performanceText,
+                        onValueChange = { input -> performanceText = input.filter { it.isDigit() } },
+                        label = { Text("실적 금액") },
+                        supportingText = {
+                            Text(
+                                when (performancePeriod) {
+                                    PeriodUnit.YEAR -> "매년 1월 1일에 0부터 다시 셉니다. 작년 실적도 함께 보여 줍니다."
+                                    else -> "매월 1일에 0부터 다시 셉니다. 지난달 실적도 함께 보여 줍니다."
+                                }
+                            )
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    ExclusionRow(
+                        summary = exclusionSummary(excluded, expenseCategories),
+                        onClick = { pickingExclusions = true },
                     )
                 }
             }
@@ -586,16 +646,170 @@ private fun AccountEditDialog(
                         initialBalanceText.toLongOrNull() ?: 0L,
                         limitPeriod?.let { AccountLimit(limitText.toLongOrNull() ?: 0L, it) },
                         parentId,
+                        performancePeriod?.let {
+                            AccountPerformance(performanceText.toLongOrNull() ?: 0L, it, excluded)
+                        },
                     )
                 },
-                // 한도를 고르고 금액을 비워 두면 무엇을 셀지 정할 수 없다. 저장 전에 막는다.
-                enabled = name.isNotBlank() && (limitPeriod == null || (limitText.toLongOrNull() ?: 0L) > 0L),
+                // 한도나 실적을 고르고 금액을 비워 두면 무엇을 셀지 정할 수 없다. 저장 전에 막는다.
+                enabled = name.isNotBlank() &&
+                    (limitPeriod == null || (limitText.toLongOrNull() ?: 0L) > 0L) &&
+                    (performancePeriod == null || (performanceText.toLongOrNull() ?: 0L) > 0L),
             ) { Text("저장") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("취소") }
         },
     )
+
+    if (pickingExclusions) {
+        ExclusionPickerDialog(
+            nodes = expenseCategories,
+            initial = excluded,
+            onDismiss = { pickingExclusions = false },
+            onConfirm = {
+                excluded = it
+                pickingExclusions = false
+            },
+        )
+    }
+}
+
+/** "실적에서 뺄 카테고리" 줄. 누르면 고르는 창이 열린다. 수정 창 안에 체크 목록을 펼치면 너무 길어진다. */
+@Composable
+private fun ExclusionRow(summary: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.small)
+            .clickable(onClickLabel = "실적에서 뺄 카테고리 고르기", onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("실적에서 뺄 카테고리", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
+/** 고른 카테고리 이름을 목록 순서대로. 아무것도 없으면 무엇을 세는지 적어 둔다. */
+private fun exclusionSummary(excluded: Set<Long>, nodes: List<CategoryNode>): String {
+    val names = nodes.flatMap { listOf(it.category) + it.children }
+        .filter { it.id in excluded }
+        .map { it.name }
+    return if (names.isEmpty()) "없음 · 이 카드로 쓴 지출을 모두 셉니다" else names.joinToString(", ")
+}
+
+/**
+ * 실적에서 뺄 카테고리 고르기.
+ *
+ * 대분류를 고르면 소분류도 함께 빠지므로 소분류 칸은 체크된 채 잠근다. 따로 풀 수 있게 두면
+ * "공과금은 빼되 전기는 센다"가 되는데, 그런 카드는 소분류만 골라 쓰면 된다.
+ */
+@Composable
+private fun ExclusionPickerDialog(
+    nodes: List<CategoryNode>,
+    initial: Set<Long>,
+    onDismiss: () -> Unit,
+    onConfirm: (Set<Long>) -> Unit,
+) {
+    var selected by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("실적에서 뺄 카테고리") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    text = "카드사가 실적으로 쳐 주지 않는 결제(공과금, 상품권 등)를 고르세요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                nodes.forEach { node ->
+                    val parentChecked = node.category.id in selected
+                    ExclusionCheckRow(
+                        name = node.category.name,
+                        colorArgb = node.category.colorArgb,
+                        checked = parentChecked,
+                        enabled = true,
+                        indent = false,
+                        onToggle = {
+                            // 대분류가 소분류를 덮으니 소분류 체크는 지운다. 남겨 두면 대분류를 풀었을 때 몇 개만 살아난다.
+                            val childIds = node.children.map { it.id }.toSet()
+                            selected = if (parentChecked) {
+                                selected - node.category.id
+                            } else {
+                                selected - childIds + node.category.id
+                            }
+                        },
+                    )
+                    node.children.forEach { child ->
+                        val checked = child.id in selected
+                        ExclusionCheckRow(
+                            name = child.name,
+                            colorArgb = child.colorArgb,
+                            checked = parentChecked || checked,
+                            enabled = !parentChecked,
+                            indent = true,
+                            onToggle = { selected = if (checked) selected - child.id else selected + child.id },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(selected) }) { Text("확인") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        },
+    )
+}
+
+@Composable
+private fun ExclusionCheckRow(
+    name: String,
+    colorArgb: Int,
+    checked: Boolean,
+    enabled: Boolean,
+    indent: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onToggle)
+            .padding(start = if (indent) 24.dp else 0.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = checked, onCheckedChange = { onToggle() }, enabled = enabled)
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(Color(colorArgb)),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = name,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (indent) FontWeight.Normal else FontWeight.Medium,
+        )
+    }
 }
 
 /** 한도 선택지. null 은 "없음"이다. */

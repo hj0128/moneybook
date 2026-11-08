@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -52,6 +53,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
@@ -66,6 +68,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -86,6 +89,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hj0128.moneybook.ui.common.limitSummary
+import com.hj0128.moneybook.ui.common.performanceSummary
 import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.AccountNode
@@ -298,7 +303,7 @@ fun EntryScreen(
                         PickerRow(
                             label = state.type.accountLabel,
                             value = state.selectedAccountName,
-                            divider = false,
+                            divider = state.showsPerformanceToggle,
                             onClick = {
                                 dismissInputs()
                                 sheet = EntrySheet.Account(
@@ -307,6 +312,13 @@ fun EntryScreen(
                                 )
                             },
                         )
+                        if (state.showsPerformanceToggle) {
+                            PerformanceExcludeRow(
+                                checked = state.excludedFromPerformance,
+                                recurring = state.savesRecurring,
+                                onCheckedChange = viewModel::setExcludedFromPerformance,
+                            )
+                        }
                     }
                 }
 
@@ -345,6 +357,7 @@ fun EntryScreen(
                             onRemove = viewModel::removePart,
                             onMemoChange = viewModel::updatePartMemo,
                             onMemoFocused = viewModel::hideKeypad,
+                            onExcludeChange = viewModel::setPartExcludedFromPerformance,
                             onAdd = { focusManager.clearFocus(); viewModel.addPart() },
                         )
                     } else {
@@ -604,6 +617,34 @@ private fun PickerRow(
         )
     }
     if (divider) RowDivider()
+}
+
+/**
+ * 이 내역만 실적에서 빼기. 상품권처럼 카테고리로는 가를 수 없는 결제에 쓴다.
+ * 결제수단 바로 아래에 둔다. 실적은 그 카드의 이야기라 카드를 고른 자리 옆에 있어야 무엇을 빼는지 읽힌다.
+ */
+@Composable
+private fun PerformanceExcludeRow(checked: Boolean, recurring: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(horizontal = 16.dp)
+            .heightIn(min = 56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("실적에서 빼기", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                // 고정 지출이면 지금 저장하는 것이 내역이 아니라 앞으로 넣을 규칙이다.
+                text = if (recurring) "앞으로 넣을 내역마다 실적에서 뺍니다(관리비·통신비 등)"
+                else "카드사가 실적으로 쳐 주지 않는 결제(상품권 등)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = null)
+    }
 }
 
 /**
@@ -1273,13 +1314,21 @@ private fun AccountOption(
             if (account.hasLimit) {
                 val over = account.limitRemaining < 0
                 Text(
-                    text = if (over) {
-                        "${account.limitPeriodLabel} ${(-account.limitRemaining).formatWon()} 초과"
-                    } else {
-                        "${account.limitPeriodLabel} 남은 ${account.limitRemaining.formatWon()}"
-                    },
+                    text = limitSummary(account),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (over) ledgerColors.expense else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // 어느 카드로 긁을지 고르는 자리라, 실적이 얼마 남았는지가 바로 쓸모 있다.
+            if (account.hasPerformance) {
+                Text(
+                    text = performanceSummary(account),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (account.performanceAchieved) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
         }
@@ -1308,6 +1357,7 @@ private fun SplitSection(
     onRemove: (Int) -> Unit,
     onMemoChange: (Int, String) -> Unit,
     onMemoFocused: () -> Unit,
+    onExcludeChange: (Int, Boolean) -> Unit,
     onAdd: () -> Unit,
 ) {
     Row(
@@ -1336,6 +1386,7 @@ private fun SplitSection(
                 onRemove = { onRemove(index) },
                 onMemoChange = { onMemoChange(index, it) },
                 onMemoFocused = onMemoFocused,
+                onExcludeChange = { onExcludeChange(index, it) },
             )
             if (index != state.parts.lastIndex) RowDivider()
         }
@@ -1359,6 +1410,7 @@ private fun SplitPartRow(
     onRemove: () -> Unit,
     onMemoChange: (String) -> Unit,
     onMemoFocused: () -> Unit,
+    onExcludeChange: (Boolean) -> Unit,
 ) {
     val category = state.categoryNodes.findSelected(part.categoryId)
     val accountName = state.accounts.firstOrNull { it.id == part.accountId }?.name
@@ -1457,6 +1509,28 @@ private fun SplitPartRow(
             onValueChange = onMemoChange,
             onFocused = onMemoFocused,
         )
+        // 실적 있는 카드를 고른 줄에만. 결제수단 글자와 같은 들여쓰기라 그 줄에 딸린 값으로 읽힌다.
+        if (state.partShowsPerformanceToggle(index)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .toggleable(
+                        value = part.excludedFromPerformance,
+                        role = Role.Switch,
+                        onValueChange = onExcludeChange,
+                    )
+                    .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "실적에서 빼기",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = part.excludedFromPerformance, onCheckedChange = null)
+            }
+        }
     }
 }
 

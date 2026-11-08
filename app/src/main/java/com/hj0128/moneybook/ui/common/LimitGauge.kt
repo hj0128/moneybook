@@ -26,7 +26,10 @@ import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatWon
 
 /**
- * 한도 사용 막대. "올해 620,000 / 1,000,000원 · 남은 380,000원".
+ * 한도 사용 막대. "올해 한도 620,000 / 1,000,000원 · 380,000원 남음".
+ *
+ * 한도·실적·예산은 모두 "[기간] [무엇] 쓴 돈 / 기준 · 남음|초과|달성" 한 가지 틀로 적는다.
+ * 셋이 화면마다 "남은 X", "X 더", "X 모자람"처럼 다르게 쓰이면 같은 뜻인지 매번 다시 읽어야 한다.
  *
  * 자산 관리, 결제수단별 목록, 결제수단 상세가 같은 모양을 쓴다. 어디서 보든 같은 숫자가
  * 같은 자리에 있어야 "아까 본 그 막대"로 알아본다.
@@ -41,7 +44,7 @@ fun LimitGauge(
 ) {
     val limit = account.limitAmount ?: return
     UsageGauge(
-        periodLabel = account.limitPeriodLabel,
+        periodLabel = "${account.limitPeriodLabel} 한도",
         used = account.limitUsed,
         limit = limit,
         color = Color(account.colorArgb),
@@ -72,8 +75,7 @@ fun UsageGauge(
     val over = remaining < 0
     val ledgerColors = LocalLedgerColors.current
     val barColor = if (over) ledgerColors.expense else color
-    // "남은 X원"과 같은 자리, 같은 순서로 읽히게 "초과 X원"으로 쓴다.
-    val remainingText = if (over) "초과 ${(-remaining).formatWon()}" else "남은 ${remaining.formatWon()}"
+    val remainingText = remainingWord(remaining)
 
     Column(
         modifier = modifier.semantics(mergeDescendants = true) {
@@ -82,7 +84,7 @@ fun UsageGauge(
         },
     ) {
         Row(verticalAlignment = Alignment.Bottom) {
-            // 폭이 모자라면 왼쪽이 줄어든다. 오른쪽 "남은 X원"이 두 줄로 깨지면 숫자가 반으로 갈려 읽을 수 없다.
+            // 폭이 모자라면 왼쪽이 줄어든다. 오른쪽 "X원 남음"이 두 줄로 깨지면 숫자가 반으로 갈려 읽을 수 없다.
             Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.Bottom) {
                 if (name != null) {
                     Text(
@@ -150,3 +152,110 @@ fun UsageGauge(
         }
     }
 }
+
+/**
+ * 실적 막대. "이번 달 실적 180,000 / 300,000원 · 120,000원 남음", 그 아래 "지난달 실적 320,000원 · 달성".
+ *
+ * 한도 막대와 같은 자리에 같은 순서로 숫자를 놓는다. 다만 한도는 남은 금액이 줄어드는 게
+ * 좋은 소식이 아니고 실적은 막대가 차는 게 좋은 소식이라, 넘겨도 빨갛게 바꾸지 않고 "달성"으로 적는다.
+ *
+ * 지난 실적을 함께 적는 이유: 혜택은 보통 지난달 실적으로 정해진다. 이번 달 막대만 보면
+ * "지금 혜택을 받고 있나"를 알 수 없다.
+ */
+@Composable
+fun PerformanceGauge(
+    account: AccountBalance,
+    modifier: Modifier = Modifier,
+) {
+    val target = account.performanceTarget ?: return
+    val used = account.performanceUsed
+    val achieved = account.performanceAchieved
+    val doneColor = MaterialTheme.colorScheme.primary
+    val rightText = if (achieved) "달성" else remainingWord(account.performanceRemaining)
+    val prevText = performancePrevText(account)
+
+    Column(
+        modifier = modifier.semantics(mergeDescendants = true) {
+            contentDescription = "${account.name} ${account.performancePeriodLabel} 실적 " +
+                "${used.formatWon()}, 목표 ${target.formatWon()}, $rightText, $prevText"
+        },
+    ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = "${account.performancePeriodLabel} 실적 ",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                Text(
+                    text = used.formatWon(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Text(
+                    text = " / ${target.formatWon()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = rightText,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color = if (achieved) doneColor else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            val fraction = (used.toDouble() / target).toFloat().coerceIn(0f, 1f)
+            if (fraction > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction)
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (achieved) doneColor else Color(account.colorArgb)),
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = prevText,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (account.performancePrevAchieved) doneColor else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** "지난달 실적 320,000원 · 달성" / "지난달 실적 210,000원 · 90,000원 미달". */
+fun performancePrevText(account: AccountBalance): String {
+    val target = account.performanceTarget ?: 0L
+    val prev = account.performancePrev
+    val result = if (account.performancePrevAchieved) "달성" else "${(target - prev).formatWon()} 미달"
+    return "${account.performancePrevLabel} 실적 ${prev.formatWon()} · $result"
+}
+
+/** 남은 금액 한 마디. 0보다 작으면 넘긴 것이다. 한도·실적·예산이 모두 이 말을 쓴다. */
+fun remainingWord(remaining: Long): String =
+    if (remaining < 0) "${(-remaining).formatWon()} 초과" else "${remaining.formatWon()} 남음"
+
+/** 한 줄 요약. "올해 한도 380,000원 남음" / "올해 한도 120,000원 초과". */
+fun limitSummary(account: AccountBalance): String =
+    "${account.limitPeriodLabel} 한도 ${remainingWord(account.limitRemaining)}"
+
+/** 한 줄 요약. "이번 달 실적 30,000원 남음" / "이번 달 실적 달성". */
+fun performanceSummary(account: AccountBalance): String =
+    "${account.performancePeriodLabel} 실적 " +
+        if (account.performanceAchieved) "달성" else remainingWord(account.performanceRemaining)

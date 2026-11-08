@@ -32,6 +32,9 @@ data class TransactionDetail(
     /** 고정 지출이 자동으로 넣은 내역이면 그 고정 지출 id. */
     @ColumnInfo(name = "recurring_id")
     val recurringId: Long? = null,
+    /** 이 내역만 카드 실적에서 뺐는지. */
+    @ColumnInfo(name = "excluded_from_performance")
+    val excludedFromPerformance: Boolean = false,
 ) {
     val date: LocalDate get() = LocalDate.ofEpochDay(dateEpochDay)
 
@@ -64,7 +67,9 @@ data class TransactionDetail(
         get() = if (type == TransactionType.TRANSFER) {
             ""
         } else {
-            listOfNotNull(categoryName ?: "미분류", accountName).joinToString(" | ")
+            listOfNotNull(categoryName ?: "미분류", accountName).joinToString(" | ") +
+                // 실적 막대의 숫자가 왜 합계보다 작은지 목록에서 바로 알 수 있게.
+                if (excludedFromPerformance) " · 실적 제외" else ""
         }
 }
 
@@ -101,8 +106,39 @@ data class AccountBalance(
     /** 같은 부모 아래에서의 순서. */
     @ColumnInfo(name = "sort_order")
     val sortOrder: Int = 0,
+    @ColumnInfo(name = "performance_target")
+    val performanceTarget: Long? = null,
+    @ColumnInfo(name = "performance_period")
+    val performancePeriod: PeriodUnit? = null,
+    /** 지금 주기에 실적으로 친 지출. 뺄 카테고리는 빼고 센다. 실적 목표가 없으면 0. */
+    @ColumnInfo(name = "performance_used")
+    val performanceUsed: Long = 0L,
+    /** 바로 전 주기(지난달 또는 작년)의 실적. 카드 혜택은 보통 지난달 실적으로 정해진다. */
+    @ColumnInfo(name = "performance_prev")
+    val performancePrev: Long = 0L,
 ) {
     val hasLimit: Boolean get() = limitAmount != null && limitPeriod != null
+
+    val hasPerformance: Boolean get() = performanceTarget != null && performancePeriod != null
+
+    /** 목표까지 더 써야 하는 금액. 채웠으면 0. */
+    val performanceRemaining: Long get() = ((performanceTarget ?: 0L) - performanceUsed).coerceAtLeast(0L)
+
+    val performanceAchieved: Boolean get() = hasPerformance && performanceUsed >= (performanceTarget ?: 0L)
+
+    val performancePrevAchieved: Boolean get() = hasPerformance && performancePrev >= (performanceTarget ?: 0L)
+
+    val performancePeriodLabel: String
+        get() = when (performancePeriod) {
+            PeriodUnit.YEAR -> "올해"
+            PeriodUnit.MONTH, null -> "이번 달"
+        }
+
+    val performancePrevLabel: String
+        get() = when (performancePeriod) {
+            PeriodUnit.YEAR -> "작년"
+            PeriodUnit.MONTH, null -> "지난달"
+        }
 
     val isTopLevel: Boolean get() = parentId == null
 

@@ -62,6 +62,7 @@ import com.hj0128.moneybook.data.local.entity.CategoryEntity
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.ui.common.LimitGauge
+import com.hj0128.moneybook.ui.common.PerformanceGauge
 import com.hj0128.moneybook.ui.common.UsageGauge
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
 import com.hj0128.moneybook.util.formatWon
@@ -193,6 +194,35 @@ fun CategoryDetailScreen(
                                 account = account,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                             )
+                        }
+                    }
+                    state.account?.takeIf { it.hasPerformance }?.let { account ->
+                        item(key = "performance") {
+                            PerformanceGauge(
+                                account = account,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                    items(state.childGauges, key = { "gauge-${it.id}" }) { child ->
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(child.colorArgb)),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = child.name,
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            LimitGauge(account = child)
+                            if (child.hasLimit && child.hasPerformance) Spacer(Modifier.height(10.dp))
+                            PerformanceGauge(account = child)
                         }
                     }
                     // 예산은 보고 있는 달 기준이다. 지난달로 넘기면 그 달에 예산을 지켰는지 본다.

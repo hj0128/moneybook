@@ -113,18 +113,23 @@ class LedgerRepository(
         categoryDao.observeByType(type).map { it.toNodes() }
 
     /**
-     * 자산 목록. 한도 사용액은 [today] 가 속한 달/해 기준이다.
+     * 자산 목록. 한도 사용액과 실적은 [today] 가 속한 달/해 기준이고, 지난 실적은 그 바로 전 달/해다.
      *
      * 화면이 떠 있는 동안 날짜가 바뀌어도 다시 구독하기 전까지는 이전 기간 기준이다.
      * 가계부를 자정을 넘겨 켜 두는 일은 드물어서 그 정도는 감수한다.
      */
     fun observeAccounts(today: LocalDate = LocalDate.now()): Flow<List<AccountBalance>> {
         val month = YearMonth.from(today)
+        val prevMonth = month.minusMonths(1)
         return accountDao.observeBalances(
             monthStart = month.atDay(1).toEpochDay(),
             monthEnd = month.atEndOfMonth().toEpochDay(),
             yearStart = LocalDate.of(today.year, 1, 1).toEpochDay(),
             yearEnd = LocalDate.of(today.year, 12, 31).toEpochDay(),
+            prevMonthStart = prevMonth.atDay(1).toEpochDay(),
+            prevMonthEnd = prevMonth.atEndOfMonth().toEpochDay(),
+            prevYearStart = LocalDate.of(today.year - 1, 1, 1).toEpochDay(),
+            prevYearEnd = LocalDate.of(today.year - 1, 12, 31).toEpochDay(),
         )
     }
 
@@ -279,6 +284,7 @@ class LedgerRepository(
         merchant: String,
         memo: String,
         nowMillis: Long,
+        excludedFromPerformance: Boolean = false,
     ): Long {
         require(amount > 0) { "금액은 0보다 커야 합니다." }
         if (type == TransactionType.TRANSFER) {
@@ -297,6 +303,8 @@ class LedgerRepository(
                 merchant = merchant.trim(),
                 memo = memo.trim(),
                 createdAt = nowMillis,
+                // 실적은 쓴 돈의 이야기라 지출만 뺄 수 있다.
+                excludedFromPerformance = excludedFromPerformance && type == TransactionType.EXPENSE,
             )
         )
     }
@@ -319,6 +327,7 @@ class LedgerRepository(
         date: LocalDate,
         merchant: String,
         memo: String,
+        excludedFromPerformance: Boolean = false,
     ): Result<Unit> {
         if (amount <= 0) return Result.failure(IllegalArgumentException("금액은 0보다 커야 합니다."))
         if (type == TransactionType.TRANSFER) {
@@ -342,6 +351,7 @@ class LedgerRepository(
                 dateEpochDay = date.toEpochDay(),
                 merchant = merchant.trim(),
                 memo = memo.trim(),
+                excludedFromPerformance = excludedFromPerformance && type == TransactionType.EXPENSE,
             )
         )
         return Result.success(Unit)
@@ -396,6 +406,8 @@ class LedgerRepository(
                 createdAt = createdAt,
                 // 고정 지출로 들어온 내역을 나눠도 어디서 왔는지는 남긴다. 지워지면 그 달이 아직 안 들어간 것처럼 보인다.
                 recurringId = original?.recurringId,
+                // 줄마다 따로 뺀다. 줄마다 카드가 다를 수 있고, 같은 카드여도 상품권 줄만 빼고 싶을 때가 있다.
+                excludedFromPerformance = part.excludedFromPerformance && type == TransactionType.EXPENSE,
             )
         }
         transactionDao.replacePayment(replacingId, rows)
@@ -438,6 +450,7 @@ class LedgerRepository(
         anchor: LocalDate,
         merchant: String,
         memo: String,
+        excludedFromPerformance: Boolean = false,
     ): Result<Unit> {
         if (amount <= 0) return Result.failure(IllegalArgumentException("금액은 0보다 커야 합니다."))
         val transfer = type == TransactionType.TRANSFER
@@ -469,6 +482,7 @@ class LedgerRepository(
             anchorEpochDay = anchor.toEpochDay(),
             nextEpochDay = firstDate.toEpochDay(),
             createdAt = id?.let { recurringDao.findById(it)?.createdAt } ?: now,
+            excludedFromPerformance = excludedFromPerformance && type == TransactionType.EXPENSE,
         )
         if (id == null) recurringDao.insert(rule) else recurringDao.update(rule)
         applyRecurring()
@@ -492,10 +506,12 @@ class LedgerRepository(
         initialBalance: Long,
         limit: AccountLimit? = null,
         parentId: Long? = null,
+        performance: AccountPerformance? = null,
     ): Result<Long> {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("이름을 입력해 주세요."))
         limit?.validate()?.let { return Result.failure(it) }
+        performance?.validate()?.let { return Result.failure(it) }
         validateParent(id = null, parentId = parentId)?.let { return Result.failure(it) }
         if (accountDao.countSameName(trimmed, excludeId = 0L) > 0) {
             return Result.failure(IllegalArgumentException("같은 이름이 이미 있습니다."))
@@ -510,8 +526,11 @@ class LedgerRepository(
                 limitAmount = limit?.amount,
                 limitPeriod = limit?.period,
                 parentId = parentId,
+                performanceTarget = performance?.target,
+                performancePeriod = performance?.period,
             )
         )
+        accountDao.replaceExclusions(id, performance?.excludedCategoryIds.orEmpty())
         return Result.success(id)
     }
 
@@ -528,10 +547,12 @@ class LedgerRepository(
         initialBalance: Long,
         limit: AccountLimit? = null,
         parentId: Long? = null,
+        performance: AccountPerformance? = null,
     ): Result<Unit> {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("이름을 입력해 주세요."))
         limit?.validate()?.let { return Result.failure(it) }
+        performance?.validate()?.let { return Result.failure(it) }
         val current = accountDao.findById(id)
             ?: return Result.failure(IllegalStateException("자산을 찾을 수 없습니다."))
         validateParent(id = id, parentId = parentId)?.let { return Result.failure(it) }
@@ -548,14 +569,22 @@ class LedgerRepository(
                 limitAmount = limit?.amount,
                 limitPeriod = limit?.period,
                 parentId = parentId,
+                performanceTarget = performance?.target,
+                performancePeriod = performance?.period,
                 // 다른 상위로 옮기면 그 목록의 맨 끝에 넣는다. 예전 번호는 옮겨 간 곳에서 뜻이 없다.
                 sortOrder = if (parentId == current.parentId) current.sortOrder else accountDao.nextSortOrder(parentId),
             )
         )
         // 상위의 종류를 바꾸면 하위도 따라간다. "체크카드" 아래 A카드만 "카드"로 남으면 안 된다.
         if (newType != current.type) accountDao.updateChildrenType(id, newType)
+        // 실적을 없애면 뺄 카테고리도 지운다. 남겨 두면 나중에 실적을 다시 켰을 때 모르는 사이에 빠져 있다.
+        accountDao.replaceExclusions(id, performance?.excludedCategoryIds.orEmpty())
         return Result.success(Unit)
     }
+
+    /** 수정 창을 열 때 채워 넣을 뺄 카테고리. */
+    suspend fun performanceExclusions(accountId: Long): Set<Long> =
+        accountDao.excludedCategoryIds(accountId).toSet()
 
     /**
      * 하위 자산의 종류는 상위를 따른다. 체크카드 아래 A카드는 당연히 카드라서 다시 묻지 않는다.
@@ -602,6 +631,16 @@ data class AccountLimit(val amount: Long, val period: PeriodUnit) {
         if (amount <= 0L) IllegalArgumentException("한도 금액을 입력해 주세요.") else null
 }
 
+/** 카드 실적 목표. 금액과 주기는 한도처럼 늘 짝이고, 뺄 카테고리는 실적이 있을 때만 뜻이 있다. */
+data class AccountPerformance(
+    val target: Long,
+    val period: PeriodUnit,
+    val excludedCategoryIds: Set<Long> = emptySet(),
+) {
+    fun validate(): Throwable? =
+        if (target <= 0L) IllegalArgumentException("실적 금액을 입력해 주세요.") else null
+}
+
 /** 삭제 다이얼로그가 무엇을 물어봐야 할지 정하는 근거. */
 data class CategoryUsage(
     val directTransactions: Int,
@@ -631,4 +670,5 @@ data class PaymentPart(
     val categoryId: Long,
     val accountId: Long,
     val memo: String = "",
+    val excludedFromPerformance: Boolean = false,
 )

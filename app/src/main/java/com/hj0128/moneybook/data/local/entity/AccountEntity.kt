@@ -61,6 +61,16 @@ data class AccountEntity(
     /** 상위 자산이면 null, 하위 자산이면 부모 자산 id. */
     @ColumnInfo(name = "parent_id")
     val parentId: Long? = null,
+    /**
+     * 실적 목표(원). 카드 혜택을 받으려고 주기마다 채워야 하는 사용액이다.
+     *
+     * 한도와 방향이 반대라(넘기지 말 것 / 채울 것) 칸을 따로 둔다. 한 카드에 둘 다 있을 수 있다.
+     */
+    @ColumnInfo(name = "performance_target")
+    val performanceTarget: Long? = null,
+    /** 실적을 세는 주기. 달력 기준이다. [performanceTarget] 와 함께 있거나 함께 없다. */
+    @ColumnInfo(name = "performance_period")
+    val performancePeriod: PeriodUnit? = null,
 ) {
     val isTopLevel: Boolean get() = parentId == null
 }
