@@ -115,13 +115,6 @@ private val entryTypes = listOf(
 /** 라벨 칸 너비. 값이 어느 줄에서나 같은 자리에서 시작해야 눈으로 훑기 쉽다. */
 private val LabelWidth = 88.dp
 
-/**
- * 같은 칸이라도 종류에 따라 부르는 이름이 다르다.
- * 수입에 "결제수단"이라고 써 두면 무엇을 고르라는 건지 알 수 없다.
- */
-private val TransactionType.accountLabel: String
-    get() = if (this == TransactionType.INCOME) "입금 자산" else "결제수단"
-
 /** 어느 자산 칸을 고르는 중인지. 이체는 출금/입금 두 칸을 쓴다. */
 private enum class AccountTarget { FROM, TO }
 

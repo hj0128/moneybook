@@ -416,6 +416,15 @@ interface TransactionDao {
     @Query("UPDATE transactions SET category_id = :categoryId WHERE id IN (:ids)")
     suspend fun assignCategory(ids: List<Long>, categoryId: Long)
 
+    /**
+     * 일괄 자산 옮기기. "체크카드"로 적어 둔 내역을 카드별 하위 자산으로 나눌 때 쓴다.
+     *
+     * 이체는 건드리지 않는다. 보내는 쪽과 받는 쪽이 함께 있어 한쪽만 바꾸면 뜻이 달라진다.
+     * 상세 화면은 이체를 보여주지 않지만, 쿼리에서도 막아 둔다.
+     */
+    @Query("UPDATE transactions SET account_id = :accountId WHERE id IN (:ids) AND type != 'TRANSFER'")
+    suspend fun assignAccount(ids: List<Long>, accountId: Long)
+
     @Query("SELECT * FROM transactions WHERE id = :id")
     suspend fun findById(id: Long): TransactionEntity?
 

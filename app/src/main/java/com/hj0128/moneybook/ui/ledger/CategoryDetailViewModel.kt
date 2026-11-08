@@ -31,6 +31,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** 자산 옮기기 후보 한 줄. [parentName] 은 하위 자산일 때만 채워진다. */
+data class AssignableAccount(
+    val account: AccountBalance,
+    val parentName: String?,
+) {
+    val label: String get() = parentName?.let { "$it > ${account.name}" } ?: account.name
+}
+
 /** 재분류 후보 한 줄. [parentName] 은 소분류일 때만 채워진다. */
 data class AssignableCategory(
     val category: CategoryEntity,
@@ -424,6 +432,28 @@ class CategoryDetailViewModel(
                 initialValue = emptyList(),
             )
 
+    /**
+     * 옮겨 갈 수 있는 자산. 입력 화면과 같은 규칙이라 하위가 있는 상위 자산은 빠진다.
+     * 결제수단 상세라면 보고 있는 그 자산도 뺀다. 같은 곳으로 옮기는 건 아무 일도 안 한다.
+     */
+    val assignableAccounts: StateFlow<List<AssignableAccount>> =
+        repository.observeAccountTree()
+            .map { nodes ->
+                nodes.flatMap { node ->
+                    node.selectable.map { account ->
+                        AssignableAccount(
+                            account = account,
+                            parentName = node.account.name.takeIf { node.hasChildren },
+                        )
+                    }
+                }.filterNot { source is DetailSource.Account && it.account.id == source.id }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
+
     fun startSelection() {
         _selectionMode.value = true
     }
@@ -450,6 +480,16 @@ class CategoryDetailViewModel(
         if (ids.isEmpty()) return
         viewModelScope.launch {
             repository.assignCategory(ids, categoryId)
+            exitSelection()
+        }
+    }
+
+    /** 고른 내역을 한 자산으로 옮긴다. 옮기고 나면 선택 모드를 끝낸다. */
+    fun assignSelectedAccount(accountId: Long) {
+        val ids = _selectedIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.assignAccount(ids, accountId)
             exitSelection()
         }
     }

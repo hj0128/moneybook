@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -94,6 +96,7 @@ fun CategoryDetailScreen(
     val inSelectionMode by viewModel.selectionMode.collectAsStateWithLifecycle()
     val selectedIds by viewModel.selectedIds.collectAsStateWithLifecycle()
     val assignable by viewModel.assignableCategories.collectAsStateWithLifecycle()
+    val assignableAccounts by viewModel.assignableAccounts.collectAsStateWithLifecycle()
     var pendingDeleteId by remember { mutableStateOf<Long?>(null) }
     /**
      * 추이를 볼 소분류. null 이면 카테고리 전체.
@@ -103,6 +106,8 @@ fun CategoryDetailScreen(
     val selectedChild = state.childTotals.firstOrNull { it.categoryId == pickedChildId }
     val visibleGroups = remember(state, selectedChild) { state.groupsOf(selectedChild?.categoryId) }
     var showAssignSheet by remember { mutableStateOf(false) }
+    var showAssignAccount by remember { mutableStateOf(false) }
+    var showMoveMenu by remember { mutableStateOf(false) }
 
     // 선택 모드에서 뒤로가기는 화면을 나가는 대신 선택을 푼다.
     BackHandler(enabled = inSelectionMode) { viewModel.exitSelection() }
@@ -151,10 +156,32 @@ fun CategoryDetailScreen(
                                 viewModel.selectAll(visibleGroups.flatMap { group -> group.items.map { it.id } })
                             },
                         ) { Text("전체") }
-                        TextButton(
-                            onClick = { showAssignSheet = true },
-                            enabled = selectedIds.isNotEmpty(),
-                        ) { Text("옮기기") }
+                        // 카테고리와 결제수단 중 무엇을 바꿀지 먼저 고른다. 버튼을 둘 두면 상단바가 넘친다.
+                        Box {
+                            TextButton(
+                                onClick = { showMoveMenu = true },
+                                enabled = selectedIds.isNotEmpty(),
+                            ) { Text("옮기기") }
+                            DropdownMenu(
+                                expanded = showMoveMenu,
+                                onDismissRequest = { showMoveMenu = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("카테고리 바꾸기") },
+                                    onClick = {
+                                        showMoveMenu = false
+                                        showAssignSheet = true
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("${state.type.accountLabel} 바꾸기") },
+                                    onClick = {
+                                        showMoveMenu = false
+                                        showAssignAccount = true
+                                    },
+                                )
+                            }
+                        }
                     } else if (!state.isEmpty) {
                         IconButton(onClick = viewModel::startSelection) {
                             Icon(Icons.Default.Checklist, contentDescription = "선택해서 옮기기")
@@ -288,6 +315,19 @@ fun CategoryDetailScreen(
             onSelect = { categoryId ->
                 viewModel.assignSelected(categoryId)
                 showAssignSheet = false
+            },
+        )
+    }
+
+    if (showAssignAccount) {
+        AssignAccountDialog(
+            accounts = assignableAccounts,
+            count = selectedIds.size,
+            title = state.type.accountLabel,
+            onDismiss = { showAssignAccount = false },
+            onSelect = { accountId ->
+                viewModel.assignSelectedAccount(accountId)
+                showAssignAccount = false
             },
         )
     }
@@ -592,6 +632,62 @@ private fun AssignCategoryDialog(
                                     .size(10.dp)
                                     .clip(CircleShape)
                                     .background(Color(item.category.colorArgb)),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = item.label,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        },
+    )
+}
+
+/**
+ * 고른 내역을 어느 자산으로 옮길지 고른다. 카테고리 옮기기와 같은 모양이다("체크카드 > 국민").
+ *
+ * 잔액과 한도·실적은 내역에서 그때그때 세므로, 옮기면 두 자산 숫자가 함께 바로 바뀐다.
+ */
+@Composable
+private fun AssignAccountDialog(
+    accounts: List<AssignableAccount>,
+    count: Int,
+    title: String,
+    onDismiss: () -> Unit,
+    onSelect: (Long) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${count}건을 옮길 $title") },
+        text = {
+            if (accounts.isEmpty()) {
+                Text("옮길 곳이 없습니다.")
+            } else {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    accounts.forEach { item ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(item.account.id) }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(item.account.colorArgb)),
                             )
                             Spacer(Modifier.width(12.dp))
                             Text(

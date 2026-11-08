@@ -17,6 +17,13 @@ enum class TransactionType {
             EXPENSE -> "지출"
             TRANSFER -> "이체"
         }
+
+    /**
+     * 자산 칸을 부르는 이름. 같은 칸이라도 종류에 따라 다르다.
+     * 수입에 "결제수단"이라고 써 두면 무엇을 고르라는 건지 알 수 없다.
+     */
+    val accountLabel: String
+        get() = if (this == INCOME) "입금 자산" else "결제수단"
 }
 
 /** 자산 종류. */

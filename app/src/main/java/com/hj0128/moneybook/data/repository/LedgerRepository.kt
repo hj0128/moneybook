@@ -103,6 +103,12 @@ class LedgerRepository(
         transactionDao.assignCategory(transactionIds, categoryId)
     }
 
+    /** 고른 내역을 한 자산으로 옮긴다. 이체는 그대로 둔다. */
+    suspend fun assignAccount(transactionIds: List<Long>, accountId: Long) {
+        if (transactionIds.isEmpty()) return
+        transactionDao.assignAccount(transactionIds, accountId)
+    }
+
     fun observeCategory(id: Long): Flow<CategoryEntity?> = categoryDao.observeById(id)
 
     fun observeCategories(type: TransactionType): Flow<List<CategoryEntity>> =
