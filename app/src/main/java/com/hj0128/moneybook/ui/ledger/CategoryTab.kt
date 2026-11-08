@@ -59,6 +59,7 @@ import com.hj0128.moneybook.data.model.UncategorizedTotal
 import com.hj0128.moneybook.ui.common.RangePickerDialog
 import com.hj0128.moneybook.ui.common.UsageGauge
 import com.hj0128.moneybook.ui.common.limitSummary
+import com.hj0128.moneybook.ui.common.performancePrevWord
 import com.hj0128.moneybook.ui.common.performanceSummary
 import com.hj0128.moneybook.ui.common.remainingWord
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
@@ -403,7 +404,7 @@ private fun LimitNote(account: AccountBalance) {
 private fun PerformanceNote(account: AccountBalance) {
     if (!account.hasPerformance) return
     val now = performanceSummary(account)
-    val prev = "${account.performancePrevLabel} ${if (account.performancePrevAchieved) "달성" else "미달"}"
+    val prev = "${account.performancePrevLabel} ${performancePrevWord(account)}"
     Text(
         text = "$now · $prev",
         style = MaterialTheme.typography.bodySmall,

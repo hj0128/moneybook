@@ -110,6 +110,9 @@ data class AccountBalance(
     val performanceTarget: Long? = null,
     @ColumnInfo(name = "performance_period")
     val performancePeriod: PeriodUnit? = null,
+    /** 1단계 위의 실적 단계. "700000,1000000". 단계를 안 쓰면 null. */
+    @ColumnInfo(name = "performance_steps")
+    val performanceSteps: String? = null,
     /** 지금 주기에 실적으로 친 지출. 뺄 카테고리는 빼고 센다. 실적 목표가 없으면 0. */
     @ColumnInfo(name = "performance_used")
     val performanceUsed: Long = 0L,
@@ -121,12 +124,31 @@ data class AccountBalance(
 
     val hasPerformance: Boolean get() = performanceTarget != null && performancePeriod != null
 
-    /** 목표까지 더 써야 하는 금액. 채웠으면 0. */
-    val performanceRemaining: Long get() = ((performanceTarget ?: 0L) - performanceUsed).coerceAtLeast(0L)
+    /** 실적 단계. 작은 것부터. 단계를 안 쓰면 목표 하나뿐이다. */
+    val performanceTiers: List<Long>
+        get() {
+            val first = performanceTarget ?: return emptyList()
+            val steps = performanceSteps.orEmpty().split(',').mapNotNull { it.trim().toLongOrNull() }
+            return (listOf(first) + steps.filter { it > first }).distinct().sorted()
+        }
 
-    val performanceAchieved: Boolean get() = hasPerformance && performanceUsed >= (performanceTarget ?: 0L)
+    val isTiered: Boolean get() = performanceTiers.size > 1
 
-    val performancePrevAchieved: Boolean get() = hasPerformance && performancePrev >= (performanceTarget ?: 0L)
+    /** [amount] 로 채운 단계 수. 0 이면 1단계도 못 채웠다. */
+    fun tiersReached(amount: Long): Int = performanceTiers.count { amount >= it }
+
+    /** 다음에 채울 단계 금액. 모든 단계를 채웠으면 null. */
+    val performanceNextTarget: Long? get() = performanceTiers.firstOrNull { performanceUsed < it }
+
+    /** 다음 단계까지 더 써야 하는 금액. 다 채웠으면 0. */
+    val performanceRemaining: Long get() = performanceNextTarget?.let { it - performanceUsed } ?: 0L
+
+    /** 모든 단계를 채웠는지. 단계가 하나면 그 목표를 채웠는지와 같다. */
+    val performanceAchieved: Boolean get() = hasPerformance && performanceNextTarget == null
+
+    /** 지난 주기에 1단계라도 채웠는지. 그러면 이번 주기에 혜택을 받는다. */
+    val performancePrevAchieved: Boolean
+        get() = hasPerformance && performancePrev >= (performanceTiers.firstOrNull() ?: 0L)
 
     val performancePeriodLabel: String
         get() = when (performancePeriod) {

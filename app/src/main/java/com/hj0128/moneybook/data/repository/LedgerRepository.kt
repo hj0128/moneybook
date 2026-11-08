@@ -534,6 +534,7 @@ class LedgerRepository(
                 parentId = parentId,
                 performanceTarget = performance?.target,
                 performancePeriod = performance?.period,
+                performanceSteps = performance?.stepsText,
             )
         )
         accountDao.replaceExclusions(id, performance?.excludedCategoryIds.orEmpty())
@@ -577,6 +578,7 @@ class LedgerRepository(
                 parentId = parentId,
                 performanceTarget = performance?.target,
                 performancePeriod = performance?.period,
+                performanceSteps = performance?.stepsText,
                 // 다른 상위로 옮기면 그 목록의 맨 끝에 넣는다. 예전 번호는 옮겨 간 곳에서 뜻이 없다.
                 sortOrder = if (parentId == current.parentId) current.sortOrder else accountDao.nextSortOrder(parentId),
             )
@@ -642,9 +644,30 @@ data class AccountPerformance(
     val target: Long,
     val period: PeriodUnit,
     val excludedCategoryIds: Set<Long> = emptySet(),
+    /** 1단계([target]) 위의 단계. 작은 것부터. */
+    val steps: List<Long> = emptyList(),
 ) {
-    fun validate(): Throwable? =
-        if (target <= 0L) IllegalArgumentException("실적 금액을 입력해 주세요.") else null
+    fun validate(): Throwable? = when {
+        target <= 0L || steps.any { it <= 0L } -> IllegalArgumentException("실적 금액을 입력해 주세요.")
+        steps.any { it <= target } || steps.zipWithNext().any { (a, b) -> a >= b } ->
+            IllegalArgumentException("단계마다 금액이 달라야 합니다.")
+        else -> null
+    }
+
+    val stepsText: String? get() = steps.takeIf { it.isNotEmpty() }?.joinToString(",")
+
+    companion object {
+        /** 적은 순서와 상관없이 작은 것이 1단계다. 같은 금액이 둘이면 [validate] 가 막는다. */
+        fun of(amounts: List<Long>, period: PeriodUnit, excludedCategoryIds: Set<Long>): AccountPerformance {
+            val sorted = amounts.sorted()
+            return AccountPerformance(
+                target = sorted.firstOrNull() ?: 0L,
+                period = period,
+                excludedCategoryIds = excludedCategoryIds,
+                steps = sorted.drop(1),
+            )
+        }
+    }
 }
 
 /** 삭제 다이얼로그가 무엇을 물어봐야 할지 정하는 근거. */

@@ -71,6 +71,15 @@ data class AccountEntity(
     /** 실적을 세는 주기. 달력 기준이다. [performanceTarget] 와 함께 있거나 함께 없다. */
     @ColumnInfo(name = "performance_period")
     val performancePeriod: PeriodUnit? = null,
+    /**
+     * 1단계([performanceTarget]) 위의 실적 단계. "700000,1000000"처럼 작은 것부터 쉼표로 잇는다. 없으면 null.
+     *
+     * 카드 혜택은 "30만원 이상 5%, 70만원 이상 10%"처럼 단계로 나뉘는 일이 많다.
+     * 1단계는 원래 칸에 그대로 두어, 단계를 안 쓰는 카드와 실적 셈 쿼리는 바뀌지 않는다.
+     * 목록 변환기를 두지 않은 이유: Room 은 List<Long> 변환기가 있으면 `IN (:ids)` 인자까지 그걸로 바꾼다.
+     */
+    @ColumnInfo(name = "performance_steps")
+    val performanceSteps: String? = null,
 ) {
     val isTopLevel: Boolean get() = parentId == null
 }

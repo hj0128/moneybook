@@ -167,11 +167,15 @@ fun PerformanceGauge(
     account: AccountBalance,
     modifier: Modifier = Modifier,
 ) {
-    val target = account.performanceTarget ?: return
+    if (!account.hasPerformance) return
+    val tiers = account.performanceTiers
     val used = account.performanceUsed
     val achieved = account.performanceAchieved
+    // 분모는 다음에 채울 단계다. 다 채웠으면 맨 위 단계. 막대 길이는 맨 위 단계에 맞춘다.
+    val target = account.performanceNextTarget ?: tiers.last()
+    val top = tiers.last()
     val doneColor = MaterialTheme.colorScheme.primary
-    val rightText = if (achieved) "달성" else remainingWord(account.performanceRemaining)
+    val rightText = performanceProgressWord(account)
     val prevText = performancePrevText(account)
 
     Column(
@@ -219,7 +223,7 @@ fun PerformanceGauge(
                 .clip(RoundedCornerShape(4.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
-            val fraction = (used.toDouble() / target).toFloat().coerceIn(0f, 1f)
+            val fraction = (used.toDouble() / top).toFloat().coerceIn(0f, 1f)
             if (fraction > 0f) {
                 Box(
                     modifier = Modifier
@@ -228,6 +232,22 @@ fun PerformanceGauge(
                         .clip(RoundedCornerShape(4.dp))
                         .background(if (achieved) doneColor else Color(account.colorArgb)),
                 )
+            }
+            // 중간 단계 자리에 눈금. 막대가 어디까지 차면 다음 혜택인지 보인다.
+            tiers.dropLast(1).forEach { tier ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth((tier.toDouble() / top).toFloat())
+                        .height(8.dp),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(2.dp)
+                            .height(8.dp)
+                            .background(MaterialTheme.colorScheme.surface),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -239,12 +259,40 @@ fun PerformanceGauge(
     }
 }
 
-/** "지난달 실적 320,000원 · 달성" / "지난달 실적 210,000원 · 90,000원 미달". */
+/**
+ * "지난달 실적 320,000원 · 달성" / "지난달 실적 210,000원 · 90,000원 미달".
+ * 단계가 있으면 "지난달 실적 520,000원 · 1단계 달성". 미달은 1단계까지 모자란 금액이다.
+ */
 fun performancePrevText(account: AccountBalance): String {
-    val target = account.performanceTarget ?: 0L
     val prev = account.performancePrev
-    val result = if (account.performancePrevAchieved) "달성" else "${(target - prev).formatWon()} 미달"
-    return "${account.performancePrevLabel} 실적 ${prev.formatWon()} · $result"
+    return "${account.performancePrevLabel} 실적 ${prev.formatWon()} · ${performancePrevWord(account, withShortfall = true)}"
+}
+
+/**
+ * 지난 실적 한 마디. "달성" / "1단계 달성" / "미달"([withShortfall] 이면 "90,000원 미달").
+ * 단계가 있으면 몇 단계인지가 곧 이번 혜택이라 "달성" 대신 단계를 적는다.
+ */
+fun performancePrevWord(account: AccountBalance, withShortfall: Boolean = false): String {
+    val reached = account.tiersReached(account.performancePrev)
+    return when {
+        reached > 0 && account.isTiered -> "${reached}단계 달성"
+        reached > 0 -> "달성"
+        withShortfall -> "${((account.performanceTiers.firstOrNull() ?: 0L) - account.performancePrev).formatWon()} 미달"
+        else -> "미달"
+    }
+}
+
+/**
+ * 이번 실적 한 마디. "120,000원 남음" / "달성".
+ * 단계가 있으면 채운 단계를 앞에 붙인다: "1단계 달성 · 180,000원 남음"(다음 단계까지) / "2단계 달성".
+ */
+fun performanceProgressWord(account: AccountBalance): String {
+    val reached = account.tiersReached(account.performanceUsed)
+    return when {
+        account.performanceAchieved -> if (account.isTiered) "${reached}단계 달성" else "달성"
+        reached > 0 -> "${reached}단계 달성 · ${remainingWord(account.performanceRemaining)}"
+        else -> remainingWord(account.performanceRemaining)
+    }
 }
 
 /** 남은 금액 한 마디. 0보다 작으면 넘긴 것이다. 한도·실적·예산이 모두 이 말을 쓴다. */
@@ -255,7 +303,6 @@ fun remainingWord(remaining: Long): String =
 fun limitSummary(account: AccountBalance): String =
     "${account.limitPeriodLabel} 한도 ${remainingWord(account.limitRemaining)}"
 
-/** 한 줄 요약. "이번 달 실적 30,000원 남음" / "이번 달 실적 달성". */
+/** 한 줄 요약. "이번 달 실적 30,000원 남음" / "이번 달 실적 달성" / "이번 달 실적 1단계 달성 · 180,000원 남음". */
 fun performanceSummary(account: AccountBalance): String =
-    "${account.performancePeriodLabel} 실적 " +
-        if (account.performanceAchieved) "달성" else remainingWord(account.performanceRemaining)
+    "${account.performancePeriodLabel} 실적 ${performanceProgressWord(account)}"

@@ -44,7 +44,7 @@ abstract class AppDatabase : RoomDatabase() {
         const val DB_NAME = "household.db"
 
         /** 백업을 복원할 때 이보다 새 버전에서 만든 파일은 받지 않는다(내려가는 마이그레이션이 없다). */
-        const val VERSION = 11
+        const val VERSION = 12
 
         @Volatile
         private var instance: AppDatabase? = null
@@ -56,7 +56,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 // 외래키 제약을 실제로 켜준다(Room 은 기본으로 켜지 않는다).
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -278,5 +278,12 @@ internal val MIGRATION_10_11 = object : Migration(10, 11) {
             "INSERT INTO categories (name, type, color_argb, sort_order) VALUES (?, 'INCOME', ?, ?)",
             arrayOf<Any>(DefaultData.REFUND_CATEGORY, DefaultData.REFUND_COLOR.toInt(), order),
         )
+    }
+}
+
+/** v12: 실적 단계. 1단계 위의 단계를 적는 칸 하나를 더한다. 비어 있으면 예전처럼 목표 하나다. */
+internal val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `accounts` ADD COLUMN `performance_steps` TEXT")
     }
 }

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.SwapVert
@@ -51,6 +52,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -482,9 +484,13 @@ private fun AccountEditDialog(
     var limitPeriod by remember(target) { mutableStateOf(existing?.limitPeriod) }
     var limitText by remember(target) { mutableStateOf(existing?.limitAmount?.toString().orEmpty()) }
     var performancePeriod by remember(target) { mutableStateOf(existing?.performancePeriod) }
-    var performanceText by remember(target) {
-        mutableStateOf(existing?.performanceTarget?.toString().orEmpty())
+    // 단계마다 한 칸. 단계를 안 쓰면 한 칸뿐이다.
+    val performanceTexts = remember(target) {
+        mutableStateListOf<String>().apply {
+            addAll(existing?.performanceTiers.orEmpty().map { it.toString() }.ifEmpty { listOf("") })
+        }
     }
+    val performanceAmounts = performanceTexts.map { it.toLongOrNull() ?: 0L }
     var excluded by remember(target) {
         mutableStateOf((target as? AccountEditTarget.Edit)?.excludedCategoryIds.orEmpty())
     }
@@ -613,22 +619,47 @@ private fun AccountEditDialog(
                 }
                 if (performancePeriod != null) {
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = performanceText,
-                        onValueChange = { input -> performanceText = input.filter { it.isDigit() } },
-                        label = { Text("실적 금액") },
-                        supportingText = {
-                            Text(
-                                when (performancePeriod) {
-                                    PeriodUnit.YEAR -> "매년 1월 1일에 0부터 다시 셉니다. 작년 실적도 함께 보여 줍니다."
-                                    else -> "매월 1일에 0부터 다시 셉니다. 지난달 실적도 함께 보여 줍니다."
+                    performanceTexts.forEachIndexed { index, text ->
+                        val isLast = index == performanceTexts.lastIndex
+                        OutlinedTextField(
+                            value = text,
+                            onValueChange = { input -> performanceTexts[index] = input.filter { it.isDigit() } },
+                            // 한 칸이면 예전처럼 "실적 금액". 단계를 더하면 몇 단계인지 적는다(저장할 때 작은 것부터 다시 매긴다).
+                            label = { Text(if (performanceTexts.size == 1) "실적 금액" else "${index + 1}단계 금액") },
+                            trailingIcon = if (performanceTexts.size > 1) {
+                                {
+                                    IconButton(onClick = { performanceTexts.removeAt(index) }) {
+                                        Icon(Icons.Default.Close, contentDescription = "${index + 1}단계 빼기")
+                                    }
                                 }
-                            )
-                        },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                            } else {
+                                null
+                            },
+                            supportingText = if (isLast) {
+                                {
+                                    Text(
+                                        when (performancePeriod) {
+                                            PeriodUnit.YEAR -> "매년 1월 1일에 0부터 다시 셉니다. 작년 실적도 함께 보여 줍니다."
+                                            else -> "매월 1일에 0부터 다시 셉니다. 지난달 실적도 함께 보여 줍니다."
+                                        }
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    // "30만원 이상 5%, 70만원 이상 10%"처럼 혜택이 단계로 나뉘는 카드용. 다섯 단계면 충분하다.
+                    if (performanceTexts.size < MaxPerformanceTiers) {
+                        TextButton(onClick = { performanceTexts.add("") }) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("단계 추가")
+                        }
+                    }
                     ExclusionRow(
                         summary = exclusionSummary(excluded, expenseCategories),
                         onClick = { pickingExclusions = true },
@@ -647,14 +678,15 @@ private fun AccountEditDialog(
                         limitPeriod?.let { AccountLimit(limitText.toLongOrNull() ?: 0L, it) },
                         parentId,
                         performancePeriod?.let {
-                            AccountPerformance(performanceText.toLongOrNull() ?: 0L, it, excluded)
+                            AccountPerformance.of(performanceAmounts, it, excluded)
                         },
                     )
                 },
                 // 한도나 실적을 고르고 금액을 비워 두면 무엇을 셀지 정할 수 없다. 저장 전에 막는다.
                 enabled = name.isNotBlank() &&
                     (limitPeriod == null || (limitText.toLongOrNull() ?: 0L) > 0L) &&
-                    (performancePeriod == null || (performanceText.toLongOrNull() ?: 0L) > 0L),
+                    (performancePeriod == null ||
+                        (performanceAmounts.all { it > 0L } && performanceAmounts.distinct().size == performanceAmounts.size)),
             ) { Text("저장") }
         },
         dismissButton = {
@@ -964,3 +996,6 @@ private fun buildDeleteSummary(target: AccountDeleteTarget): String {
     val summary = parts.joinToString(", ")
     return "이 자산에 ${summary.withSubjectJosa()} 달려 있습니다."
 }
+
+/** 실적 단계 수 상한. 카드 혜택이 그보다 잘게 나뉘는 일은 드물고, 칸이 늘면 수정 창이 길어진다. */
+private const val MaxPerformanceTiers = 5

@@ -64,6 +64,7 @@ interface AccountDao {
                ), 0), 0) END AS limit_used,
                a.performance_target AS performance_target,
                a.performance_period AS performance_period,
+               a.performance_steps AS performance_steps,
                CASE WHEN a.performance_target IS NULL THEN 0 ELSE MAX(IFNULL((
                    SELECT SUM(CASE t.type WHEN 'INCOME' THEN -t.amount ELSE t.amount END)
                    FROM transactions AS t
