@@ -14,7 +14,9 @@ import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.repository.LedgerRepository
 import java.time.LocalDate
+import java.time.DayOfWeek
 import java.time.YearMonth
+import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -125,10 +127,12 @@ data class CategoryDetailUiState(
      *
      * 올해는 이번 달까지의 달 수로 나눈다. 아직 오지 않은 11·12월까지 12로 나누면
      * 실제 씀씀이보다 낮게 나온다. 이번 달은 합계에 이미 들어 있으니 분모에도 넣는다.
+     *
+     * 직접 고른 기간은 길이와 상관없이 하루 평균이다. 기간이 달로 끊기지 않아 "월 평균"의 분모가 애매하다.
      */
     val averageLabel: String
         get() = when (period) {
-            is LedgerPeriod.Month -> "하루 평균"
+            is LedgerPeriod.Month, is LedgerPeriod.Range -> "하루 평균"
             is LedgerPeriod.Year -> "월 평균"
         }
 
@@ -136,7 +140,14 @@ data class CategoryDetailUiState(
         get() = when (period) {
             is LedgerPeriod.Month -> total / elapsedDays(period.yearMonth)
             is LedgerPeriod.Year -> total / elapsedMonths(period.year)
+            is LedgerPeriod.Range -> total / elapsedDays(period)
         }
+
+    /** 기간 안에서 오늘까지의 날 수. 아직 시작하지 않은 기간은 합계가 0 이라 길이 전체로 나눠도 된다. */
+    private fun elapsedDays(range: LedgerPeriod.Range): Long = when {
+        today.isBefore(range.start) || today.isAfter(range.end) -> range.days
+        else -> ChronoUnit.DAYS.between(range.start, today) + 1
+    }
 
     /** 이번 달은 오늘까지의 일수. 월 평균과 같은 이유로 아직 오지 않은 날은 분모에서 뺀다. */
     private fun elapsedDays(month: YearMonth): Int = when {
@@ -157,7 +168,12 @@ data class CategoryDetailUiState(
     /** 년 단위는 달별, 월 단위는 주별 막대. 어느 쪽이든 보고 있는 기간 안만 쪼갠다. */
     val showsTrend: Boolean get() = !isEmpty
 
-    val trendTitle: String get() = if (period is LedgerPeriod.Year) "월별 추이" else "주별 추이"
+    val trendTitle: String
+        get() = when (val p = period) {
+            is LedgerPeriod.Year -> "월별 추이"
+            is LedgerPeriod.Month -> "주별 추이"
+            is LedgerPeriod.Range -> if (p.days > RANGE_WEEKLY_MAX_DAYS) "월별 추이" else "주별 추이"
+        }
 
     /**
      * 추이 막대. [childId] 를 주면 그 소분류만.
@@ -193,6 +209,54 @@ data class CategoryDetailUiState(
                     isFuture = p.yearMonth.atDay(first).isAfter(today),
                 )
             }
+        }
+
+        is LedgerPeriod.Range -> rangeTrend(p, childId)
+    }
+
+    /**
+     * 직접 고른 기간의 추이. 두 달 남짓까지는 달력 주(월~일)별, 그보다 길면 달별이다.
+     * 주별로 열 칸이 넘으면 막대가 가늘어져 고르기 어렵다.
+     *
+     * 양 끝 칸은 기간에 걸친 날만 센다. 15일에 시작하면 첫 칸은 그 주의 15일부터다.
+     */
+    private fun rangeTrend(range: LedgerPeriod.Range, childId: Long?): List<TrendBar> {
+        val items = groups.flatMap { it.items }.filter { childId == null || it.breakdownKey() == childId }
+        fun md(date: LocalDate) = "${date.monthValue}.${date.dayOfMonth}"
+        if (range.days <= RANGE_WEEKLY_MAX_DAYS) {
+            val firstMonday = range.start.with(DayOfWeek.MONDAY)
+            fun weekOf(date: LocalDate) = ChronoUnit.WEEKS.between(firstMonday, date).toInt()
+            val byWeek = items.groupBy { weekOf(it.date) }.mapValues { (_, list) -> list.sumOf { it.amount } }
+            return (0..weekOf(range.end)).map { week ->
+                val first = maxOf(range.start, firstMonday.plusWeeks(week.toLong()))
+                val last = minOf(range.end, firstMonday.plusWeeks(week.toLong()).plusDays(6))
+                val days = if (first == last) md(first) else "${md(first)}~${md(last)}"
+                TrendBar(
+                    label = "${week + 1}주차 ($days)",
+                    axisLabel = "${week + 1}주차",
+                    amount = byWeek[week] ?: 0L,
+                    isFuture = first.isAfter(today),
+                )
+            }
+        }
+        val firstMonth = YearMonth.from(range.start)
+        val months = ChronoUnit.MONTHS.between(firstMonth, YearMonth.from(range.end)).toInt() + 1
+        val byMonth = items.groupBy { YearMonth.from(it.date) }.mapValues { (_, list) -> list.sumOf { it.amount } }
+        // 열두 칸을 넘으면 눈금 글자가 겹친다. 몇 칸 걸러 하나씩만 적고, 고른 칸 이름은 위에 늘 나온다.
+        val every = (months + 11) / 12
+        return (0 until months).map { index ->
+            val month = firstMonth.plusMonths(index.toLong())
+            val showYear = month.year != firstMonth.year && (index == 0 || month.monthValue == 1)
+            TrendBar(
+                label = "${month.year}년 ${month.monthValue}월",
+                axisLabel = when {
+                    index % every != 0 -> ""
+                    showYear -> "${month.year % 100}.${month.monthValue}"
+                    else -> "${month.monthValue}"
+                },
+                amount = byMonth[month] ?: 0L,
+                isFuture = month.atDay(1).isAfter(today),
+            )
         }
     }
 
@@ -407,3 +471,6 @@ class CategoryDetailViewModel(
             }
     }
 }
+
+/** 직접 고른 기간을 주별로 쪼개는 최대 길이. 이보다 길면 달별이다(주 열 칸 남짓). */
+private const val RANGE_WEEKLY_MAX_DAYS = 62L

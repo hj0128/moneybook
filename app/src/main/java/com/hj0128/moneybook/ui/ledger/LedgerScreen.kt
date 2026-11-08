@@ -58,7 +58,8 @@ fun LedgerScreen(
     val tab by viewModel.tab.collectAsStateWithLifecycle()
     val yearMonth by viewModel.yearMonth.collectAsStateWithLifecycle()
     val categoryType by viewModel.categoryType.collectAsStateWithLifecycle()
-    val categoryUnit by viewModel.categoryUnit.collectAsStateWithLifecycle()
+    val categoryMode by viewModel.categoryMode.collectAsStateWithLifecycle()
+    val categoryPeriod by viewModel.categoryPeriod.collectAsStateWithLifecycle()
     var pendingDeleteId by remember { mutableStateOf<Long?>(null) }
 
     Scaffold(
@@ -68,11 +69,13 @@ fun LedgerScreen(
                 title = {
                     PeriodSelector(
                         // 한 해를 통째로 보는 중이면 제목도 연도만 쓴다. 화살표 보폭과 같은 기준이다.
-                        label = if (viewModel.isYearView(tab, categoryUnit)) {
-                            "${yearMonth.year}년"
-                        } else {
-                            "${yearMonth.year}년 ${yearMonth.monthValue}월"
+                        label = when {
+                            viewModel.isRangeView(tab, categoryMode) -> categoryPeriod.label
+                            viewModel.isYearView(tab, categoryMode) -> "${yearMonth.year}년"
+                            else -> "${yearMonth.year}년 ${yearMonth.monthValue}월"
                         },
+                        // "2025.12.15 ~ 2026.1.14"는 큰 글씨로는 검색·메뉴 버튼까지 밀고 들어간다.
+                        compact = viewModel.isRangeView(tab, categoryMode),
                         onPrevious = viewModel::showPrevious,
                         onNext = viewModel::showNext,
                     )
@@ -126,13 +129,13 @@ fun LedgerScreen(
                     viewModel = viewModel,
                     // 지금 보고 있는 기간(한 달 또는 한 해)을 그대로 넘긴다. 상세는 그 기간에 고정된다.
                     onOpenCategory = { categoryId ->
-                        onOpenCategory(categoryId, LedgerPeriod.of(categoryUnit, yearMonth))
+                        onOpenCategory(categoryId, categoryPeriod)
                     },
                     onOpenUncategorized = {
-                        onOpenUncategorized(categoryType, LedgerPeriod.of(categoryUnit, yearMonth))
+                        onOpenUncategorized(categoryType, categoryPeriod)
                     },
                     onOpenAccount = { accountId ->
-                        onOpenAccount(accountId, categoryType, LedgerPeriod.of(categoryUnit, yearMonth))
+                        onOpenAccount(accountId, categoryType, categoryPeriod)
                     },
                     onOpenBudget = onOpenBudget,
                 )
@@ -212,12 +215,17 @@ private fun PeriodSelector(
     label: String,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    compact: Boolean = false,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onPrevious) {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "이전")
         }
-        Text(text = label, style = MaterialTheme.typography.titleLarge)
+        Text(
+            text = label,
+            style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
+            maxLines = 1,
+        )
         IconButton(onClick = onNext) {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "다음")
         }

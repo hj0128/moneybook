@@ -21,6 +21,7 @@ import com.hj0128.moneybook.ui.ledger.DetailSource
 import com.hj0128.moneybook.ui.ledger.LedgerScreen
 import com.hj0128.moneybook.ui.recurring.RecurringScreen
 import com.hj0128.moneybook.ui.search.SearchScreen
+import java.time.LocalDate
 import java.time.YearMonth
 
 object Routes {
@@ -47,25 +48,32 @@ object Routes {
     fun recurringEdit(recurringId: Long): String = "recurring/edit/$recurringId"
 
     /**
+     * 직접 고른 기간은 연/월 두 칸으로 나타낼 수 없어 시작·끝 날짜(epoch day)를 뒤에 붙인다.
+     * 연/월 자리에는 시작한 달을 넣어 둔다. 날짜가 없으면 예전처럼 연/월로 읽는다.
+     */
+    const val RANGE_QUERY = "?from={from}&to={to}"
+    const val NO_DATE = Long.MIN_VALUE
+
+    /**
      * 카테고리 상세. 보고 있던 기간을 같이 넘긴다.
      *
      * 기간을 통째로 넘기는 대신 연/월 정수로 쪼갠 이유는, 프로세스가 죽었다 살아나도
      * 문자열 파싱 없이 그대로 복원되고 딥링크로도 읽기 쉬운 형태이기 때문이다.
      * month 가 0 이면 그 해 전체다. 실제 달은 1~12 라 겹치지 않는다.
      */
-    const val CATEGORY_DETAIL = "category/{categoryId}/{year}/{month}"
+    const val CATEGORY_DETAIL = "category/{categoryId}/{year}/{month}$RANGE_QUERY"
 
     fun categoryDetail(categoryId: Long, period: LedgerPeriod): String =
         "category/$categoryId/${period.toPathSegments()}"
 
     /** 미분류는 카테고리 id 가 없으니 수입/지출로 좁힌다. */
-    const val UNCATEGORIZED = "uncategorized/{type}/{year}/{month}"
+    const val UNCATEGORIZED = "uncategorized/{type}/{year}/{month}$RANGE_QUERY"
 
     fun uncategorized(type: TransactionType, period: LedgerPeriod): String =
         "uncategorized/${type.name}/${period.toPathSegments()}"
 
     /** 결제수단 상세. 자산은 수입·지출이 다 오가므로 어느 쪽을 볼지도 넘긴다. */
-    const val ACCOUNT_DETAIL = "account/{accountId}/{type}/{year}/{month}"
+    const val ACCOUNT_DETAIL = "account/{accountId}/{type}/{year}/{month}$RANGE_QUERY"
 
     fun accountDetail(accountId: Long, type: TransactionType, period: LedgerPeriod): String =
         "account/$accountId/${type.name}/${period.toPathSegments()}"
@@ -75,10 +83,16 @@ object Routes {
     private fun LedgerPeriod.toPathSegments(): String = when (this) {
         is LedgerPeriod.Month -> "${yearMonth.year}/${yearMonth.monthValue}"
         is LedgerPeriod.Year -> "$year/$WHOLE_YEAR"
+        is LedgerPeriod.Range ->
+            "${start.year}/${start.monthValue}?from=${start.toEpochDay()}&to=${end.toEpochDay()}"
     }
 
-    fun periodFrom(year: Int, month: Int): LedgerPeriod =
-        if (month == WHOLE_YEAR) LedgerPeriod.Year(year) else LedgerPeriod.Month(YearMonth.of(year, month))
+    fun periodFrom(year: Int, month: Int, from: Long = NO_DATE, to: Long = NO_DATE): LedgerPeriod = when {
+        from != NO_DATE && to != NO_DATE && to >= from ->
+            LedgerPeriod.Range(LocalDate.ofEpochDay(from), LocalDate.ofEpochDay(to))
+        month == WHOLE_YEAR -> LedgerPeriod.Year(year)
+        else -> LedgerPeriod.Month(YearMonth.of(year, month))
+    }
 }
 
 @Composable
@@ -178,7 +192,7 @@ fun AppNavHost(
                 navArgument("categoryId") { type = NavType.LongType },
                 navArgument("year") { type = NavType.IntType },
                 navArgument("month") { type = NavType.IntType },
-            ),
+            ) + rangeArguments,
         ) { backStackEntry ->
             val args = backStackEntry.arguments
             CategoryDetailScreen(
@@ -194,7 +208,7 @@ fun AppNavHost(
                 navArgument("type") { type = NavType.StringType },
                 navArgument("year") { type = NavType.IntType },
                 navArgument("month") { type = NavType.IntType },
-            ),
+            ) + rangeArguments,
         ) { backStackEntry ->
             val args = backStackEntry.arguments
             CategoryDetailScreen(
@@ -212,7 +226,7 @@ fun AppNavHost(
                 navArgument("type") { type = NavType.StringType },
                 navArgument("year") { type = NavType.IntType },
                 navArgument("month") { type = NavType.IntType },
-            ),
+            ) + rangeArguments,
         ) { backStackEntry ->
             val args = backStackEntry.arguments
             CategoryDetailScreen(
@@ -231,4 +245,18 @@ private fun Bundle?.toTransactionType(): TransactionType = runCatching {
 private fun Bundle?.toPeriod(): LedgerPeriod = Routes.periodFrom(
     year = this?.getInt("year") ?: YearMonth.now().year,
     month = this?.getInt("month") ?: YearMonth.now().monthValue,
+    from = this?.getLong("from", Routes.NO_DATE) ?: Routes.NO_DATE,
+    to = this?.getLong("to", Routes.NO_DATE) ?: Routes.NO_DATE,
+)
+
+/** 상세 화면 세 곳이 함께 받는 직접 고른 기간의 양 끝. 연/월로 열면 비어 있다. */
+private val rangeArguments = listOf(
+    navArgument("from") {
+        type = NavType.LongType
+        defaultValue = Routes.NO_DATE
+    },
+    navArgument("to") {
+        type = NavType.LongType
+        defaultValue = Routes.NO_DATE
+    },
 )

@@ -53,9 +53,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.CategorySortOrder
 import com.hj0128.moneybook.data.model.CategoryTotal
-import com.hj0128.moneybook.data.model.PeriodUnit
+import com.hj0128.moneybook.data.model.PeriodMode
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.UncategorizedTotal
+import com.hj0128.moneybook.ui.common.RangePickerDialog
 import com.hj0128.moneybook.ui.common.UsageGauge
 import com.hj0128.moneybook.ui.common.limitSummary
 import com.hj0128.moneybook.ui.common.performanceSummary
@@ -84,8 +85,10 @@ fun CategoryTab(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.categoryState.collectAsStateWithLifecycle()
+    val customRange by viewModel.customRange.collectAsStateWithLifecycle()
     val ledgerColors = LocalLedgerColors.current
     val listState = rememberLazyListState()
+    var pickingRange by remember { mutableStateOf(false) }
 
     // 줄 순서가 통째로 바뀌면 보고 있던 자리는 의미가 없어진다. 그대로 두면 정렬을 바꾼 직후
     // 목록 한가운데를 보게 되고, 1위가 화면 위로 밀려 올라가 안 보인다.
@@ -156,14 +159,31 @@ fun CategoryTab(
                 .padding(start = 16.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            UnitSelector(
-                selected = state.period.unit,
-                onSelect = viewModel::selectCategoryUnit,
+            PeriodModeSelector(
+                selected = state.period.mode,
+                onSelect = { mode ->
+                    // "기간"은 이미 골라져 있어도 다시 누르면 날짜를 고친다. 따로 고치는 버튼을 두지 않는다.
+                    if (mode == PeriodMode.RANGE) pickingRange = true else viewModel.selectCategoryMode(mode)
+                },
             )
             Spacer(Modifier.weight(1f))
             SortSelector(
                 selected = state.sortOrder,
                 onSelect = viewModel::selectCategorySortOrder,
+            )
+        }
+
+        if (pickingRange) {
+            // 전에 고른 기간이 있으면 그걸로 연다. 매달 같은 카드 명세서 기간을 다시 고르는 일이 많다.
+            val initial = customRange ?: state.period
+            RangePickerDialog(
+                initialStart = initial.start,
+                initialEnd = initial.end,
+                onConfirm = { start, end ->
+                    viewModel.selectCustomRange(start, end)
+                    pickingRange = false
+                },
+                onDismiss = { pickingRange = false },
             )
         }
 
@@ -206,21 +226,21 @@ fun CategoryTab(
 }
 
 /**
- * 한 달씩 볼지 한 해를 통째로 볼지. 일별 탭의 전체/수입/지출 칩과 같은 자리, 같은 모양이다.
+ * 한 달씩 볼지, 한 해를 통째로 볼지, 날짜를 직접 고를지. 일별 탭의 전체/수입/지출 칩과 같은 자리, 같은 모양이다.
  *
- * 년을 고르면 상단 제목과 화살표도 한 해 단위로 바뀐다.
+ * 년을 고르면 상단 제목과 화살표도 한 해 단위로 바뀐다. 기간을 고르면 그 기간 길이만큼 움직인다.
  */
 @Composable
-private fun UnitSelector(
-    selected: PeriodUnit,
-    onSelect: (PeriodUnit) -> Unit,
+private fun PeriodModeSelector(
+    selected: PeriodMode,
+    onSelect: (PeriodMode) -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        PeriodUnit.entries.forEach { unit ->
+        PeriodMode.entries.forEach { mode ->
             FilterChip(
-                selected = unit == selected,
-                onClick = { onSelect(unit) },
-                label = { Text(unit.label) },
+                selected = mode == selected,
+                onClick = { onSelect(mode) },
+                label = { Text(mode.label) },
             )
         }
     }

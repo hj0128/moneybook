@@ -11,7 +11,7 @@ import com.hj0128.moneybook.data.model.CategorySortOrder
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.DaySortOrder
 import com.hj0128.moneybook.data.model.LedgerPeriod
-import com.hj0128.moneybook.data.model.PeriodUnit
+import com.hj0128.moneybook.data.model.PeriodMode
 import com.hj0128.moneybook.data.model.sortedBy
 import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.MonthlySummary
@@ -188,17 +188,31 @@ class LedgerViewModel(
     val categoryType: StateFlow<TransactionType> = _categoryType.asStateFlow()
 
     /**
-     * 카테고리별 탭의 집계 단위. 기간 자체는 [_yearMonth] 하나에서 나온다.
-     * 년으로 봤다가 월로 돌아오면 보던 달이 그대로 남아 있어야 해서 단위만 따로 둔다.
+     * 카테고리별 탭의 집계 방식. 월/년이면 기간은 [_yearMonth] 하나에서 나온다.
+     * 년으로 봤다가 월로 돌아오면 보던 달이 그대로 남아 있어야 해서 방식만 따로 둔다.
      */
-    private val _categoryUnit = MutableStateFlow(PeriodUnit.MONTH)
-    val categoryUnit: StateFlow<PeriodUnit> = _categoryUnit.asStateFlow()
+    private val _categoryMode = MutableStateFlow(PeriodMode.MONTH)
+    val categoryMode: StateFlow<PeriodMode> = _categoryMode.asStateFlow()
+
+    /**
+     * 직접 고른 기간. 월로 돌아갔다가 다시 "기간"을 눌러도 고른 날짜가 남아 있다.
+     * 카드 명세서 기간처럼 매번 같은 모양을 고르는 일이 많아서다.
+     */
+    private val _customRange = MutableStateFlow<LedgerPeriod.Range?>(null)
+    val customRange: StateFlow<LedgerPeriod.Range?> = _customRange.asStateFlow()
 
     private val _categoryBasis = MutableStateFlow(BreakdownBasis.CATEGORY)
 
-    private val categoryPeriod = combine(_categoryUnit, _yearMonth) { unit, month ->
-        LedgerPeriod.of(unit, month)
-    }.distinctUntilChanged()
+    /** 카테고리별 탭이 지금 보는 기간. 상단 제목과 상세 화면으로 넘기는 값도 이것이다. */
+    val categoryPeriod: StateFlow<LedgerPeriod> =
+        combine(_categoryMode, _yearMonth, _customRange) { mode, month, range ->
+            when (mode) {
+                PeriodMode.MONTH -> LedgerPeriod.Month(month)
+                PeriodMode.YEAR -> LedgerPeriod.Year(month.year)
+                PeriodMode.RANGE -> range ?: LedgerPeriod.Month(month)
+            }
+        }.distinctUntilChanged()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, LedgerPeriod.Month(initialMonth))
 
     private val monthTransactions = _yearMonth.flatMapLatest { month ->
         repository.observeMonth(month).map { items -> month to items }
@@ -313,32 +327,46 @@ class LedgerViewModel(
         _categoryBasis.value = basis
     }
 
-    fun selectCategoryUnit(unit: PeriodUnit) {
-        _categoryUnit.value = unit
+    /** 월/년으로 바꾼다. "기간"은 날짜를 골라야 해서 [selectCustomRange] 로 들어간다. */
+    fun selectCategoryMode(mode: PeriodMode) {
+        if (mode == PeriodMode.RANGE && _customRange.value == null) return
+        _categoryMode.value = mode
     }
+
+    /** 날짜 고르기 창에서 정한 기간으로 본다. */
+    fun selectCustomRange(start: LocalDate, end: LocalDate) {
+        _customRange.value = LedgerPeriod.Range(minOf(start, end), maxOf(start, end))
+        _categoryMode.value = PeriodMode.RANGE
+    }
+
+    /** 카테고리별 탭에서 직접 고른 기간을 보는 중인지. 그때는 상단 제목과 화살표가 그 기간을 따른다. */
+    fun isRangeView(tab: LedgerTab, mode: PeriodMode): Boolean =
+        tab == LedgerTab.CATEGORY && mode == PeriodMode.RANGE
 
     /**
      * 지금 탭이 한 해 단위로 보는지. 상단 제목과 화살표 보폭이 이 값을 따른다.
-     * 월별 탭은 늘 한 해, 카테고리별 탭은 고른 단위에 따라 다르다.
+     * 월별 탭은 늘 한 해, 카테고리별 탭은 고른 방식에 따라 다르다.
      */
-    fun isYearView(tab: LedgerTab, categoryUnit: PeriodUnit): Boolean = when (tab) {
+    fun isYearView(tab: LedgerTab, mode: PeriodMode): Boolean = when (tab) {
         LedgerTab.MONTHLY -> true
-        LedgerTab.CATEGORY -> categoryUnit == PeriodUnit.YEAR
+        LedgerTab.CATEGORY -> mode == PeriodMode.YEAR
         LedgerTab.DAILY -> false
     }
 
-    /** 상단 화살표. 한 해 단위로 보는 중이면 한 해씩, 아니면 한 달씩 움직인다. */
-    fun showPrevious() {
-        _yearMonth.value = when {
-            isYearView(_tab.value, _categoryUnit.value) -> _yearMonth.value.minusYears(1)
-            else -> _yearMonth.value.minusMonths(1)
-        }
-    }
+    /** 상단 화살표. 한 해 단위로 보는 중이면 한 해씩, 직접 고른 기간이면 그 길이만큼, 아니면 한 달씩. */
+    fun showPrevious() = shift(-1)
 
-    fun showNext() {
+    fun showNext() = shift(1)
+
+    private fun shift(by: Int) {
+        val range = _customRange.value
+        if (isRangeView(_tab.value, _categoryMode.value) && range != null) {
+            _customRange.value = range.shifted(by) as LedgerPeriod.Range
+            return
+        }
         _yearMonth.value = when {
-            isYearView(_tab.value, _categoryUnit.value) -> _yearMonth.value.plusYears(1)
-            else -> _yearMonth.value.plusMonths(1)
+            isYearView(_tab.value, _categoryMode.value) -> _yearMonth.value.plusYears(by.toLong())
+            else -> _yearMonth.value.plusMonths(by.toLong())
         }
     }
 
