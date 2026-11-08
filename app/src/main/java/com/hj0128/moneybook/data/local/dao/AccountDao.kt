@@ -23,11 +23,16 @@ interface AccountDao {
      * 잔액 컬럼을 두면 거래 수정/삭제 때마다 동기화가 어긋나 결국 틀린 숫자가 남는다.
      *
      * 한도 사용액도 같은 이유로 여기서 계산한다. 주기가 자산마다 달라서(매월/매년)
-     * 이번 달과 올해 범위를 둘 다 받아 자산별로 골라 쓴다.
+     * 이번 달과 올해 범위를 둘 다 받아 자산별로 골라 쓴다. 환불로 들어온 수입은 빼고(카드도 취소하면 한도가 돌아온다),
+     * "실적에서 빼기"를 켠 지출은 그대로 센다. 실적에 안 잡힐 뿐 한도는 쓴 돈이다.
      *
      * 실적은 지금 주기와 바로 전 주기를 함께 센다. 혜택은 보통 지난달 실적으로 정해져서
      * 이번 달 진행만 보여 주면 "지금 혜택을 받고 있나"를 알 수 없다.
      * 실적에서 뺄 카테고리(소분류면 그 대분류가 빠진 경우도)에 붙은 지출과, 하나씩 뺀 내역은 세지 않는다.
+     *
+     * 실적이 있는 자산에 들어온 수입은 결제 취소(환불)로 보고 실적에서 뺀다. 카드사도 취소한 금액은 실적에서 뺀다.
+     * 캐시백처럼 환불이 아닌 수입은 내역마다 [excluded_from_performance] 를 켜서 셈에서 뺀다.
+     * 지난달 결제를 이번 달에 취소하면 이번 달이 음수가 될 수 있어 0 에서 멈춘다.
      *
      * 순서는 화면에 놓이는 순서다. 상위 다음에 그 하위가 붙어 나온다.
      */
@@ -42,23 +47,29 @@ interface AccountDao {
                a.limit_period AS limit_period,
                a.parent_id AS parent_id,
                a.sort_order AS sort_order,
-               CASE WHEN a.limit_amount IS NULL THEN 0 ELSE IFNULL((
-                   SELECT SUM(t.amount)
+               CASE WHEN a.limit_amount IS NULL THEN 0 ELSE MAX(IFNULL((
+                   SELECT SUM(
+                       CASE
+                           WHEN t.type = 'EXPENSE' THEN t.amount
+                           WHEN t.excluded_from_performance = 0 THEN -t.amount
+                           ELSE 0
+                       END
+                   )
                    FROM transactions AS t
                    WHERE t.account_id = a.id
-                     AND t.type = 'EXPENSE'
+                     AND t.type IN ('EXPENSE', 'INCOME')
                      AND t.date_epoch_day BETWEEN
                          (CASE a.limit_period WHEN 'YEAR' THEN :yearStart ELSE :monthStart END)
                          AND (CASE a.limit_period WHEN 'YEAR' THEN :yearEnd ELSE :monthEnd END)
-               ), 0) END AS limit_used,
+               ), 0), 0) END AS limit_used,
                a.performance_target AS performance_target,
                a.performance_period AS performance_period,
-               CASE WHEN a.performance_target IS NULL THEN 0 ELSE IFNULL((
-                   SELECT SUM(t.amount)
+               CASE WHEN a.performance_target IS NULL THEN 0 ELSE MAX(IFNULL((
+                   SELECT SUM(CASE t.type WHEN 'INCOME' THEN -t.amount ELSE t.amount END)
                    FROM transactions AS t
                    LEFT JOIN categories AS c ON c.id = t.category_id
                    WHERE t.account_id = a.id
-                     AND t.type = 'EXPENSE'
+                     AND t.type IN ('EXPENSE', 'INCOME')
                      AND t.date_epoch_day BETWEEN
                          (CASE a.performance_period WHEN 'YEAR' THEN :yearStart ELSE :monthStart END)
                          AND (CASE a.performance_period WHEN 'YEAR' THEN :yearEnd ELSE :monthEnd END)
@@ -68,13 +79,13 @@ interface AccountDao {
                          WHERE e.account_id = a.id
                            AND (e.category_id = t.category_id OR e.category_id = c.parent_id)
                      )
-               ), 0) END AS performance_used,
-               CASE WHEN a.performance_target IS NULL THEN 0 ELSE IFNULL((
-                   SELECT SUM(t.amount)
+               ), 0), 0) END AS performance_used,
+               CASE WHEN a.performance_target IS NULL THEN 0 ELSE MAX(IFNULL((
+                   SELECT SUM(CASE t.type WHEN 'INCOME' THEN -t.amount ELSE t.amount END)
                    FROM transactions AS t
                    LEFT JOIN categories AS c ON c.id = t.category_id
                    WHERE t.account_id = a.id
-                     AND t.type = 'EXPENSE'
+                     AND t.type IN ('EXPENSE', 'INCOME')
                      AND t.date_epoch_day BETWEEN
                          (CASE a.performance_period WHEN 'YEAR' THEN :prevYearStart ELSE :prevMonthStart END)
                          AND (CASE a.performance_period WHEN 'YEAR' THEN :prevYearEnd ELSE :prevMonthEnd END)
@@ -84,7 +95,7 @@ interface AccountDao {
                          WHERE e.account_id = a.id
                            AND (e.category_id = t.category_id OR e.category_id = c.parent_id)
                      )
-               ), 0) END AS performance_prev,
+               ), 0), 0) END AS performance_prev,
                a.initial_balance
                  + IFNULL((
                      SELECT SUM(CASE t.type WHEN 'INCOME' THEN t.amount ELSE -t.amount END)

@@ -69,7 +69,10 @@ data class EntryUiState(
      * 31일짜리의 다음 날짜는 11월 30일일 수 있다. 날짜에서 다시 읽으면 손대지 않고 저장만 해도 30일로 바뀐다.
      */
     val keptAnchor: LocalDate? = null,
-    /** 이 내역만 카드 실적에서 뺄지. 실적 목표가 있는 결제수단으로 지출할 때만 고른다. */
+    /**
+     * 이 내역을 카드 실적 셈에서 뺄지. 실적 목표가 있는 자산일 때만 고른다.
+     * 지출이면 "실적에 안 넣기", 수입이면 "환불 아님(실적에서 안 빼기)"이다.
+     */
     val excludedFromPerformance: Boolean = false,
 ) {
     /**
@@ -78,10 +81,40 @@ data class EntryUiState(
      * 고정 지출이면 앞으로 넣을 내역마다 붙는다.
      */
     val showsPerformanceToggle: Boolean
-        get() = type == TransactionType.EXPENSE && !isSplit && hasPerformance(selectedAccountId)
+        get() = when (type) {
+            TransactionType.EXPENSE -> !isSplit && hasPerformance(selectedAccountId)
+            // 앞으로 들어올 수입을 미리 환불이라 정할 일은 없다. 고정 수입이면 묻지 않고 환불로 보지 않는다.
+            // 환불은 한도도 되돌리므로 한도만 있는 자산에서도 묻는다.
+            TransactionType.INCOME -> !savesRecurring && refundTarget(selectedAccountId) != null
+            TransactionType.TRANSFER -> false
+        }
 
     fun partShowsPerformanceToggle(index: Int): Boolean =
         type == TransactionType.EXPENSE && hasPerformance(parts.getOrNull(index)?.accountId)
+
+    /**
+     * 저장할 "실적 셈에서 빼기" 값.
+     *
+     * 스위치가 안 보이면 지출은 뺄 이유가 없고(실적 없는 카드로 바꿨으면 켜 둔 값은 뜻이 없다),
+     * 수입은 환불로 셀 이유가 없다(고정 수입). 한도·실적이 없는 자산의 수입은 나중에 켜도
+     * 환불로 잡히지 않게 "빼기"로 남긴다. 켜기 전 들어온 돈까지 갑자기 한도·실적을 깎으면 안 된다.
+     */
+    val performanceFlagToSave: Boolean
+        get() = when {
+            showsPerformanceToggle -> excludedFromPerformance
+            type == TransactionType.INCOME -> true
+            else -> false
+        }
+
+    /** 환불을 켜면 무엇에서 빠지는지. "한도·실적" / "한도" / "실적", 둘 다 없으면 null. */
+    val refundTargetLabel: String? get() = refundTarget(selectedAccountId)
+
+    private fun refundTarget(accountId: Long?): String? {
+        val account = accounts.firstOrNull { it.id == accountId } ?: return null
+        return listOfNotNull("한도".takeIf { account.hasLimit }, "실적".takeIf { account.hasPerformance })
+            .joinToString("·")
+            .ifEmpty { null }
+    }
 
     private fun hasPerformance(accountId: Long?): Boolean =
         accounts.firstOrNull { it.id == accountId }?.hasPerformance == true
@@ -289,6 +322,9 @@ class EntryViewModel(
                 },
                 keypadTarget = null,
                 errorMessage = null,
+                // 지출과 수입은 이 스위치의 뜻이 반대다("실적에서 빼기" / "환불"). 켜 둔 채 넘어가면
+                // 지출에서 켠 "빼기"가 수입에서 "환불 아님"이 된다. 각자 기본값으로 돌린다.
+                excludedFromPerformance = false,
             )
         }
         observeCategories(type)
@@ -514,7 +550,7 @@ class EntryViewModel(
                     merchant = state.merchant,
                     memo = state.memo,
                     // 실적 없는 카드로 바꿨으면 켜 둔 값은 뜻이 없다. 남겨 두면 나중에 실적을 켰을 때 빠져 있다.
-                    excludedFromPerformance = state.excludedFromPerformance && state.showsPerformanceToggle,
+                    excludedFromPerformance = state.performanceFlagToSave,
                 )
                     .onSuccess { _uiState.update { it.copy(isSaved = true) } }
                     .onFailure { error ->
@@ -535,7 +571,7 @@ class EntryViewModel(
                     merchant = state.merchant,
                     memo = state.memo,
                     nowMillis = System.currentTimeMillis(),
-                    excludedFromPerformance = state.excludedFromPerformance && state.showsPerformanceToggle,
+                    excludedFromPerformance = state.performanceFlagToSave,
                 )
             }.onSuccess {
                 _uiState.update { it.copy(isSaved = true) }
@@ -559,7 +595,7 @@ class EntryViewModel(
                 anchor = state.repeatAnchor,
                 merchant = state.merchant,
                 memo = state.memo,
-                excludedFromPerformance = state.excludedFromPerformance && state.showsPerformanceToggle,
+                excludedFromPerformance = state.performanceFlagToSave,
             )
                 .onSuccess { _uiState.update { it.copy(isSaved = true) } }
                 .onFailure { error ->
@@ -587,7 +623,7 @@ class EntryViewModel(
                     categoryId = requireNotNull(state.selectedCategoryId),
                     accountId = requireNotNull(state.selectedAccountId),
                     memo = state.memo,
-                    excludedFromPerformance = state.excludedFromPerformance && state.showsPerformanceToggle,
+                    excludedFromPerformance = state.performanceFlagToSave,
                 )
             )
         }

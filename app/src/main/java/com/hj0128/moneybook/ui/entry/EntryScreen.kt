@@ -313,11 +313,20 @@ fun EntryScreen(
                             },
                         )
                         if (state.showsPerformanceToggle) {
-                            PerformanceExcludeRow(
-                                checked = state.excludedFromPerformance,
-                                recurring = state.savesRecurring,
-                                onCheckedChange = viewModel::setExcludedFromPerformance,
-                            )
+                            if (state.type == TransactionType.INCOME) {
+                                // 수입은 거꾸로 묻는다. "환불"이 켜져 있으면 실적에서 뺀다.
+                                RefundRow(
+                                    target = state.refundTargetLabel.orEmpty(),
+                                    checked = !state.excludedFromPerformance,
+                                    onCheckedChange = { viewModel.setExcludedFromPerformance(!it) },
+                                )
+                            } else {
+                                PerformanceExcludeRow(
+                                    checked = state.excludedFromPerformance,
+                                    recurring = state.savesRecurring,
+                                    onCheckedChange = viewModel::setExcludedFromPerformance,
+                                )
+                            }
                         }
                     }
                 }
@@ -639,6 +648,35 @@ private fun PerformanceExcludeRow(checked: Boolean, recurring: Boolean, onChecke
                 // 고정 지출이면 지금 저장하는 것이 내역이 아니라 앞으로 넣을 규칙이다.
                 text = if (recurring) "앞으로 넣을 내역마다 실적에서 뺍니다(관리비·통신비 등)"
                 else "카드사가 실적으로 쳐 주지 않는 결제(상품권 등)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+/**
+ * 한도나 실적이 있는 자산으로 들어온 돈이 결제 취소(환불)인지. 켜져 있으면 그만큼 쓴 돈에서 빠진다.
+ *
+ * 처음부터 켜 둔다. 카드로 들어오는 돈은 거의 다 취소한 결제다. 캐시백처럼 카드사가 실적에서
+ * 빼지 않는 돈만 끄면 된다.
+ */
+@Composable
+private fun RefundRow(target: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(horizontal = 16.dp)
+            .heightIn(min = 56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("환불", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = if (checked) "결제를 취소해 돌려받은 돈이라 ${target}에서 뺍니다"
+                else "캐시백처럼 환불이 아닌 돈이라 ${target}${if (target.endsWith("적")) "은" else "는"} 그대로입니다",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

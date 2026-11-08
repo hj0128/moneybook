@@ -69,7 +69,7 @@ data class TransactionDetail(
         } else {
             listOfNotNull(categoryName ?: "미분류", accountName).joinToString(" | ") +
                 // 실적 막대의 숫자가 왜 합계보다 작은지 목록에서 바로 알 수 있게.
-                if (excludedFromPerformance) " · 실적 제외" else ""
+                if (excludedFromPerformance && type == TransactionType.EXPENSE) " · 실적 제외" else ""
         }
 }
 

@@ -31,8 +31,13 @@ internal object DefaultData {
         Seed("용돈", 0xFF43A047),
         Seed("부수입", 0xFF00897B),
         Seed("금융소득", 0xFF00ACC1),
+        Seed(REFUND_CATEGORY, REFUND_COLOR),
         Seed("기타", 0xFF78909C),
     )
+
+    /** 환불 수입 카테고리. 마이그레이션에서도 같은 이름과 색을 쓴다. */
+    const val REFUND_CATEGORY = "환불"
+    const val REFUND_COLOR = 0xFF7CB342
 
     /** 자산 기본 색. 마이그레이션에서도 같은 값을 써야 하므로 여기 한 곳에 둔다. */
     const val ACCOUNT_COLOR_CASH = -10044566 // 0xFF66BB6A

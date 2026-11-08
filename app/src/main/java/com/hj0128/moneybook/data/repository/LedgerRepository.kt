@@ -304,7 +304,7 @@ class LedgerRepository(
                 memo = memo.trim(),
                 createdAt = nowMillis,
                 // 실적은 쓴 돈의 이야기라 지출만 뺄 수 있다.
-                excludedFromPerformance = excludedFromPerformance && type == TransactionType.EXPENSE,
+                excludedFromPerformance = excludedFromPerformance && type.affectsPerformance,
             )
         )
     }
@@ -351,7 +351,7 @@ class LedgerRepository(
                 dateEpochDay = date.toEpochDay(),
                 merchant = merchant.trim(),
                 memo = memo.trim(),
-                excludedFromPerformance = excludedFromPerformance && type == TransactionType.EXPENSE,
+                excludedFromPerformance = excludedFromPerformance && type.affectsPerformance,
             )
         )
         return Result.success(Unit)
@@ -407,7 +407,7 @@ class LedgerRepository(
                 // 고정 지출로 들어온 내역을 나눠도 어디서 왔는지는 남긴다. 지워지면 그 달이 아직 안 들어간 것처럼 보인다.
                 recurringId = original?.recurringId,
                 // 줄마다 따로 뺀다. 줄마다 카드가 다를 수 있고, 같은 카드여도 상품권 줄만 빼고 싶을 때가 있다.
-                excludedFromPerformance = part.excludedFromPerformance && type == TransactionType.EXPENSE,
+                excludedFromPerformance = part.excludedFromPerformance && type.affectsPerformance,
             )
         }
         transactionDao.replacePayment(replacingId, rows)
@@ -482,7 +482,7 @@ class LedgerRepository(
             anchorEpochDay = anchor.toEpochDay(),
             nextEpochDay = firstDate.toEpochDay(),
             createdAt = id?.let { recurringDao.findById(it)?.createdAt } ?: now,
-            excludedFromPerformance = excludedFromPerformance && type == TransactionType.EXPENSE,
+            excludedFromPerformance = excludedFromPerformance && type.affectsPerformance,
         )
         if (id == null) recurringDao.insert(rule) else recurringDao.update(rule)
         applyRecurring()
@@ -672,3 +672,10 @@ data class PaymentPart(
     val memo: String = "",
     val excludedFromPerformance: Boolean = false,
 )
+
+/**
+ * 실적 셈에 들어가는 종류. 지출은 더하고 수입(환불)은 뺀다. 이체는 쓴 돈도 돌려받은 돈도 아니다.
+ * 그래서 이체에는 "실적에서 빼기"를 저장하지 않는다.
+ */
+private val TransactionType.affectsPerformance: Boolean
+    get() = this != TransactionType.TRANSFER

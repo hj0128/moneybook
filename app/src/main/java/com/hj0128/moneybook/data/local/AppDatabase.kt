@@ -44,7 +44,7 @@ abstract class AppDatabase : RoomDatabase() {
         const val DB_NAME = "household.db"
 
         /** 백업을 복원할 때 이보다 새 버전에서 만든 파일은 받지 않는다(내려가는 마이그레이션이 없다). */
-        const val VERSION = 10
+        const val VERSION = 11
 
         @Volatile
         private var instance: AppDatabase? = null
@@ -56,7 +56,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 // 외래키 제약을 실제로 켜준다(Room 은 기본으로 켜지 않는다).
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -241,6 +241,42 @@ internal val MIGRATION_9_10 = object : Migration(9, 10) {
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS `index_account_performance_exclusions_category_id` " +
                 "ON `account_performance_exclusions` (`category_id`)"
+        )
+    }
+}
+
+/**
+ * v11: 수입 카테고리에 "환불"을 더한다. 표 구조는 그대로다.
+ *
+ * 처음 깔 때 들어가는 기본 카테고리에 더했지만, 이미 쓰던 사람은 그 목록을 다시 받지 않는다.
+ * 같은 이름이 이미 있으면 넣지 않는다(직접 만들어 쓰던 사람). "기타"가 있으면 그 바로 앞에 둔다.
+ * "기타"는 늘 맨 끝이어야 고를 때 찾기 쉽다.
+ */
+internal val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        val exists = db.query(
+            "SELECT 1 FROM categories WHERE type = 'INCOME' AND name = ?",
+            arrayOf<Any>(DefaultData.REFUND_CATEGORY),
+        ).use { it.moveToFirst() }
+        if (exists) return
+        val etcOrder = db.query(
+            "SELECT sort_order FROM categories WHERE type = 'INCOME' AND parent_id IS NULL AND name = '기타' LIMIT 1"
+        ).use { if (it.moveToFirst()) it.getInt(0) else null }
+        val order = if (etcOrder != null) {
+            db.execSQL(
+                "UPDATE categories SET sort_order = sort_order + 1 " +
+                    "WHERE type = 'INCOME' AND parent_id IS NULL AND sort_order >= ?",
+                arrayOf<Any>(etcOrder),
+            )
+            etcOrder
+        } else {
+            db.query(
+                "SELECT IFNULL(MAX(sort_order), -1) + 1 FROM categories WHERE type = 'INCOME' AND parent_id IS NULL"
+            ).use { it.moveToFirst(); it.getInt(0) }
+        }
+        db.execSQL(
+            "INSERT INTO categories (name, type, color_argb, sort_order) VALUES (?, 'INCOME', ?, ?)",
+            arrayOf<Any>(DefaultData.REFUND_CATEGORY, DefaultData.REFUND_COLOR.toInt(), order),
         )
     }
 }
