@@ -21,6 +21,7 @@ import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.LedgerPeriod
 import com.hj0128.moneybook.data.model.PerformanceCycle
+import com.hj0128.moneybook.data.model.PerformanceDay
 import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.toNodes
@@ -139,18 +140,7 @@ class LedgerRepository(
         val days = accountDao.observePerformanceDays(LocalDate.of(today.year - 1, 1, 1).toEpochDay())
         return combine(balances, days) { accounts, performanceDays ->
             val byAccount = performanceDays.groupBy { it.accountId }
-            accounts.map { account ->
-                val period = account.performancePeriod
-                if (account.performanceTarget == null || period == null) return@map account
-                val rows = byAccount[account.id].orEmpty()
-                fun sumIn(cycle: PerformanceCycle): Long =
-                    // 지난 주기에 산 걸 이번 주기에 취소하면 음수가 될 수 있다. 0 에서 멈춘다.
-                    rows.filter { LocalDate.ofEpochDay(it.epochDay) in cycle }.sumOf { it.amount }.coerceAtLeast(0L)
-                account.copy(
-                    performanceUsed = sumIn(PerformanceCycle.current(period, account.performanceStartDay, today)),
-                    performancePrev = sumIn(PerformanceCycle.previous(period, account.performanceStartDay, today)),
-                )
-            }
+            accounts.map { it.withPerformance(byAccount[it.id].orEmpty(), today) }
         }
     }
 
@@ -706,6 +696,19 @@ data class CategoryUsage(
 ) {
     /** 옮길 것이 없으면 이전 대상을 묻지 않고 바로 지운다. */
     val needsReassign: Boolean get() = directTransactions > 0 || children > 0
+}
+
+/** [rows](이 자산의 날짜별 실적)를 이 자산의 이번 주기와 지난 주기로 묶어 채운다. 실적 목표가 없으면 그대로. */
+internal fun AccountBalance.withPerformance(rows: List<PerformanceDay>, today: LocalDate): AccountBalance {
+    val period = performancePeriod
+    if (performanceTarget == null || period == null) return this
+    fun sumIn(cycle: PerformanceCycle): Long =
+        // 지난 주기에 산 걸 이번 주기에 취소하면 음수가 될 수 있다. 0 에서 멈춘다.
+        rows.filter { LocalDate.ofEpochDay(it.epochDay) in cycle }.sumOf { it.amount }.coerceAtLeast(0L)
+    return copy(
+        performanceUsed = sumIn(PerformanceCycle.current(period, performanceStartDay, today)),
+        performancePrev = sumIn(PerformanceCycle.previous(period, performanceStartDay, today)),
+    )
 }
 
 /** 이체는 자산 간 이동이라 수입/지출 어느 쪽에도 더하지 않는다. */

@@ -19,6 +19,7 @@ class DaySortTest {
         dateEpochDay = 0,
         merchant = "",
         memo = "",
+        categoryId = null,
         categoryName = null,
         categoryColor = null,
         accountName = null,

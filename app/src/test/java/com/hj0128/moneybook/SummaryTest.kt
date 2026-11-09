@@ -15,6 +15,7 @@ class SummaryTest {
         dateEpochDay = 20_000,
         merchant = "",
         memo = "",
+        categoryId = null,
         categoryName = null,
         categoryColor = null,
         accountName = null,

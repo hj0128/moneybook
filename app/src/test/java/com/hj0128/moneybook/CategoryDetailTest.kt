@@ -1,6 +1,7 @@
 package com.hj0128.moneybook
 
 import com.hj0128.moneybook.data.model.CategoryTotal
+import com.hj0128.moneybook.data.model.LedgerPeriod
 import com.hj0128.moneybook.data.model.TransactionDetail
 import com.hj0128.moneybook.data.model.TransactionType
 import com.hj0128.moneybook.data.model.UncategorizedTotal
@@ -15,7 +16,10 @@ import java.time.YearMonth
 
 class CategoryDetailTest {
 
-    private val august = YearMonth.of(2026, 8)
+    private val august = LedgerPeriod.Month(YearMonth.of(2026, 8))
+
+    /** 8월이 다 지난 날. 평균의 분모가 달 전체가 되게 오늘을 고정한다. */
+    private val autumn = LocalDate.of(2026, 10, 1)
 
     private fun expense(amount: Long, date: LocalDate) = TransactionDetail(
         id = date.toEpochDay() * 100 + amount,
@@ -24,6 +28,7 @@ class CategoryDetailTest {
         dateEpochDay = date.toEpochDay(),
         merchant = "",
         memo = "",
+        categoryId = null,
         categoryName = "식비",
         categoryColor = null,
         accountName = "현금",
@@ -31,7 +36,8 @@ class CategoryDetailTest {
     )
 
     private fun stateOf(vararg items: TransactionDetail) = CategoryDetailUiState(
-        yearMonth = august,
+        period = august,
+        today = autumn,
         categoryName = "식비",
         groups = items.toList().toDayGroups(),
     )
@@ -74,23 +80,56 @@ class CategoryDetailTest {
         )
 
         assertEquals(62_000L, state.total)
-        assertEquals(2_000L, state.dailyAverage)
+        assertEquals(2_000L, state.average)
     }
 
     @Test
     fun `2월은 28일로 나눈다`() {
         val february = CategoryDetailUiState(
-            yearMonth = YearMonth.of(2026, 2),
+            period = LedgerPeriod.Month(YearMonth.of(2026, 2)),
+            today = autumn,
             groups = listOf(expense(28_000, LocalDate.of(2026, 2, 3))).toDayGroups(),
         )
 
-        assertEquals(1_000L, february.dailyAverage)
+        assertEquals(1_000L, february.average)
+    }
+
+    @Test
+    fun `이번 달은 오늘까지의 일수로 나눈다`() {
+        val state = stateOf(expense(80_000, LocalDate.of(2026, 8, 3))).copy(today = LocalDate.of(2026, 8, 10))
+
+        assertEquals(8_000L, state.average)
+    }
+
+    @Test
+    fun `한 해는 월 평균이고 올해는 이번 달까지로 나눈다`() {
+        val state = CategoryDetailUiState(
+            period = LedgerPeriod.Year(2026),
+            today = LocalDate.of(2026, 4, 20),
+            groups = listOf(expense(120_000, LocalDate.of(2026, 2, 3))).toDayGroups(),
+        )
+
+        assertEquals("월 평균", state.averageLabel)
+        assertEquals(30_000L, state.average)
+    }
+
+    @Test
+    fun `직접 고른 기간은 하루 평균이고 지나간 날까지만 나눈다`() {
+        val range = LedgerPeriod.Range(LocalDate.of(2026, 3, 15), LocalDate.of(2026, 4, 14))
+        val items = listOf(expense(31_000, LocalDate.of(2026, 3, 20))).toDayGroups()
+
+        val past = CategoryDetailUiState(period = range, today = autumn, groups = items)
+        val ongoing = past.copy(today = LocalDate.of(2026, 3, 24))
+
+        assertEquals("하루 평균", past.averageLabel)
+        assertEquals(1_000L, past.average) // 31일 전체
+        assertEquals(3_100L, ongoing.average) // 3.15 ~ 3.24, 10일
     }
 
     @Test
     fun `소분류가 갈려 있을 때만 breakdown 을 낸다`() {
         val split = CategoryDetailUiState(
-            yearMonth = august,
+            period = august,
             categoryName = "식비",
             childTotals = listOf(
                 CategoryTotal(categoryId = 20, name = "외식", colorArgb = 0, total = 55_000, entryCount = 2),
@@ -112,7 +151,7 @@ class CategoryDetailTest {
     @Test
     fun `소분류 비중은 전체 합계 기준으로 센다`() {
         val state = CategoryDetailUiState(
-            yearMonth = august,
+            period = august,
             childTotals = listOf(
                 CategoryTotal(categoryId = 20, name = "외식", colorArgb = 0, total = 30_000, entryCount = 1),
                 CategoryTotal(categoryId = 21, name = "마트", colorArgb = 0, total = 10_000, entryCount = 1),
@@ -132,7 +171,7 @@ class CategoryDetailTest {
     fun `카테고리별 합계는 미분류까지 더한다`() {
         // 카테고리 줄만 더하면 일별 탭의 지출 합계와 숫자가 어긋난다.
         val state = CategoryUiState(
-            yearMonth = august,
+            period = august,
             totals = listOf(
                 CategoryTotal(categoryId = 1, name = "식비", colorArgb = 0, total = 75_500, entryCount = 4),
                 CategoryTotal(categoryId = 2, name = "교통", colorArgb = 0, total = 1_500, entryCount = 1),
@@ -148,7 +187,7 @@ class CategoryDetailTest {
     @Test
     fun `미분류만 있어도 빈 화면이 아니다`() {
         val state = CategoryUiState(
-            yearMonth = august,
+            period = august,
             totals = emptyList(),
             uncategorized = UncategorizedTotal(entryCount = 3, total = 9_000),
         )
@@ -159,7 +198,7 @@ class CategoryDetailTest {
 
     @Test
     fun `카테고리도 미분류도 없으면 빈 화면`() {
-        assertTrue(CategoryUiState(yearMonth = august).isEmpty)
+        assertTrue(CategoryUiState(period = august).isEmpty)
     }
 
     @Test
@@ -169,6 +208,6 @@ class CategoryDetailTest {
         assertTrue(state.isEmpty)
         assertEquals(0L, state.total)
         assertEquals(0, state.entryCount)
-        assertEquals(0L, state.dailyAverage)
+        assertEquals(0L, state.average)
     }
 }
