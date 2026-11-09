@@ -491,6 +491,12 @@ private fun AccountEditDialog(
         }
     }
     val performanceAmounts = performanceTexts.map { it.toLongOrNull() ?: 0L }
+    var startDayText by remember(target) {
+        mutableStateOf((existing?.performanceStartDay ?: 1).toString())
+    }
+    // 매월일 때만 쓴다. 비우거나 범위를 벗어나면 저장을 막는다.
+    val startDay = startDayText.toIntOrNull()?.takeIf { it in 1..31 }
+    val shownStartDay = startDay ?: 1
     var excluded by remember(target) {
         mutableStateOf((target as? AccountEditTarget.Edit)?.excludedCategoryIds.orEmpty())
     }
@@ -619,6 +625,32 @@ private fun AccountEditDialog(
                 }
                 if (performancePeriod != null) {
                     Spacer(Modifier.height(8.dp))
+                    // 카드사마다 실적을 1일부터 세지 않기도 한다("매월 15일 ~ 다음 달 14일"). 매년 실적은 늘 1월 1일부터다.
+                    if (performancePeriod == PeriodUnit.MONTH) {
+                        OutlinedTextField(
+                            value = startDayText,
+                            onValueChange = { input -> startDayText = input.filter { it.isDigit() }.take(2) },
+                            label = { Text("세기 시작하는 날") },
+                            prefix = { Text("매월 ") },
+                            suffix = { Text("일") },
+                            isError = startDay == null,
+                            supportingText = {
+                                Text(
+                                    if (startDay == null) {
+                                        "1부터 31 사이로 적어 주세요."
+                                    } else if (shownStartDay == 1) {
+                                        "1일부터 말일까지 셉니다."
+                                    } else {
+                                        "${shownStartDay}일부터 다음 달 ${shownStartDay - 1}일까지 셉니다. " +
+                                            "그날이 없는 달은 마지막 날부터 셉니다."
+                                    }
+                                )
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     performanceTexts.forEachIndexed { index, text ->
                         val isLast = index == performanceTexts.lastIndex
                         OutlinedTextField(
@@ -640,7 +672,8 @@ private fun AccountEditDialog(
                                     Text(
                                         when (performancePeriod) {
                                             PeriodUnit.YEAR -> "매년 1월 1일에 0부터 다시 셉니다. 작년 실적도 함께 보여 줍니다."
-                                            else -> "매월 1일에 0부터 다시 셉니다. 지난달 실적도 함께 보여 줍니다."
+                                            // 언제부터 세는지는 바로 위 시작일 칸이 말한다. 같은 말을 두 번 하지 않는다.
+                                            else -> "지난달 실적도 함께 보여 줍니다."
                                         }
                                     )
                                 }
@@ -678,7 +711,7 @@ private fun AccountEditDialog(
                         limitPeriod?.let { AccountLimit(limitText.toLongOrNull() ?: 0L, it) },
                         parentId,
                         performancePeriod?.let {
-                            AccountPerformance.of(performanceAmounts, it, excluded)
+                            AccountPerformance.of(performanceAmounts, it, excluded, startDay = shownStartDay)
                         },
                     )
                 },
@@ -686,7 +719,8 @@ private fun AccountEditDialog(
                 enabled = name.isNotBlank() &&
                     (limitPeriod == null || (limitText.toLongOrNull() ?: 0L) > 0L) &&
                     (performancePeriod == null ||
-                        (performanceAmounts.all { it > 0L } && performanceAmounts.distinct().size == performanceAmounts.size)),
+                        (performanceAmounts.all { it > 0L } && performanceAmounts.distinct().size == performanceAmounts.size &&
+                            (performancePeriod != PeriodUnit.MONTH || startDay != null))),
             ) { Text("저장") }
         },
         dismissButton = {

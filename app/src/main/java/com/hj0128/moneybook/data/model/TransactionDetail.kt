@@ -113,13 +113,23 @@ data class AccountBalance(
     /** 1단계 위의 실적 단계. "700000,1000000". 단계를 안 쓰면 null. */
     @ColumnInfo(name = "performance_steps")
     val performanceSteps: String? = null,
-    /** 지금 주기에 실적으로 친 지출. 뺄 카테고리는 빼고 센다. 실적 목표가 없으면 0. */
+    /**
+     * 지금 주기에 실적으로 친 금액. 뺄 카테고리와 환불은 빼고 센다. 실적 목표가 없으면 0.
+     * 쿼리는 0을 주고 저장소가 주기별로 더해 채운다(카드마다 주기 시작일이 달라서).
+     */
     @ColumnInfo(name = "performance_used")
     val performanceUsed: Long = 0L,
     /** 바로 전 주기(지난달 또는 작년)의 실적. 카드 혜택은 보통 지난달 실적으로 정해진다. */
     @ColumnInfo(name = "performance_prev")
     val performancePrev: Long = 0L,
+    /** 매월 실적을 세기 시작하는 날(1~31). null 이면 1일(달력 기준). */
+    @ColumnInfo(name = "performance_start_day")
+    val performanceStartDay: Int? = null,
 ) {
+    /** 1일이 아닌 날에 시작하는 매월 실적이면 그 날. "15일 기준"처럼 막대 아래에 적는다. */
+    val performanceCustomStartDay: Int?
+        get() = performanceStartDay?.takeIf { it != 1 && performancePeriod == PeriodUnit.MONTH }
+
     val hasLimit: Boolean get() = limitAmount != null && limitPeriod != null
 
     val hasPerformance: Boolean get() = performanceTarget != null && performancePeriod != null
@@ -177,3 +187,12 @@ data class AccountBalance(
             PeriodUnit.MONTH, null -> "이번 달"
         }
 }
+
+/** 실적 자산 하나의 하루 실적. 주기별로 묶기 전 단계다. */
+data class PerformanceDay(
+    @ColumnInfo(name = "account_id")
+    val accountId: Long,
+    @ColumnInfo(name = "date_epoch_day")
+    val epochDay: Long,
+    val amount: Long,
+)

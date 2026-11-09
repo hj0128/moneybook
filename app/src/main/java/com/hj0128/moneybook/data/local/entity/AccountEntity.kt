@@ -80,6 +80,12 @@ data class AccountEntity(
      */
     @ColumnInfo(name = "performance_steps")
     val performanceSteps: String? = null,
+    /**
+     * 매월 실적을 세기 시작하는 날(1~31). null 이면 1일, 곧 달력 기준이다.
+     * "매월 15일 ~ 다음 달 14일"처럼 세는 카드용. 그 달에 그 날이 없으면 그 달 마지막 날부터 센다.
+     */
+    @ColumnInfo(name = "performance_start_day")
+    val performanceStartDay: Int? = null,
 ) {
     val isTopLevel: Boolean get() = parentId == null
 }

@@ -10,6 +10,7 @@ import com.hj0128.moneybook.data.local.entity.AccountEntity
 import com.hj0128.moneybook.data.local.entity.PerformanceExclusionEntity
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.data.model.AccountType
+import com.hj0128.moneybook.data.model.PerformanceDay
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -26,13 +27,7 @@ interface AccountDao {
      * 이번 달과 올해 범위를 둘 다 받아 자산별로 골라 쓴다. 환불로 들어온 수입은 빼고(카드도 취소하면 한도가 돌아온다),
      * "실적에서 빼기"를 켠 지출은 그대로 센다. 실적에 안 잡힐 뿐 한도는 쓴 돈이다.
      *
-     * 실적은 지금 주기와 바로 전 주기를 함께 센다. 혜택은 보통 지난달 실적으로 정해져서
-     * 이번 달 진행만 보여 주면 "지금 혜택을 받고 있나"를 알 수 없다.
-     * 실적에서 뺄 카테고리(소분류면 그 대분류가 빠진 경우도)에 붙은 지출과, 하나씩 뺀 내역은 세지 않는다.
-     *
-     * 실적이 있는 자산에 들어온 수입은 결제 취소(환불)로 보고 실적에서 뺀다. 카드사도 취소한 금액은 실적에서 뺀다.
-     * 캐시백처럼 환불이 아닌 수입은 내역마다 [excluded_from_performance] 를 켜서 셈에서 뺀다.
-     * 지난달 결제를 이번 달에 취소하면 이번 달이 음수가 될 수 있어 0 에서 멈춘다.
+     * 실적은 여기서 세지 않는다. 카드마다 세기 시작하는 날이 달라 [observePerformanceDays] 로 따로 센다.
      *
      * 순서는 화면에 놓이는 순서다. 상위 다음에 그 하위가 붙어 나온다.
      */
@@ -65,38 +60,9 @@ interface AccountDao {
                a.performance_target AS performance_target,
                a.performance_period AS performance_period,
                a.performance_steps AS performance_steps,
-               CASE WHEN a.performance_target IS NULL THEN 0 ELSE MAX(IFNULL((
-                   SELECT SUM(CASE t.type WHEN 'INCOME' THEN -t.amount ELSE t.amount END)
-                   FROM transactions AS t
-                   LEFT JOIN categories AS c ON c.id = t.category_id
-                   WHERE t.account_id = a.id
-                     AND t.type IN ('EXPENSE', 'INCOME')
-                     AND t.date_epoch_day BETWEEN
-                         (CASE a.performance_period WHEN 'YEAR' THEN :yearStart ELSE :monthStart END)
-                         AND (CASE a.performance_period WHEN 'YEAR' THEN :yearEnd ELSE :monthEnd END)
-                     AND t.excluded_from_performance = 0
-                     AND NOT EXISTS (
-                         SELECT 1 FROM account_performance_exclusions AS e
-                         WHERE e.account_id = a.id
-                           AND (e.category_id = t.category_id OR e.category_id = c.parent_id)
-                     )
-               ), 0), 0) END AS performance_used,
-               CASE WHEN a.performance_target IS NULL THEN 0 ELSE MAX(IFNULL((
-                   SELECT SUM(CASE t.type WHEN 'INCOME' THEN -t.amount ELSE t.amount END)
-                   FROM transactions AS t
-                   LEFT JOIN categories AS c ON c.id = t.category_id
-                   WHERE t.account_id = a.id
-                     AND t.type IN ('EXPENSE', 'INCOME')
-                     AND t.date_epoch_day BETWEEN
-                         (CASE a.performance_period WHEN 'YEAR' THEN :prevYearStart ELSE :prevMonthStart END)
-                         AND (CASE a.performance_period WHEN 'YEAR' THEN :prevYearEnd ELSE :prevMonthEnd END)
-                     AND t.excluded_from_performance = 0
-                     AND NOT EXISTS (
-                         SELECT 1 FROM account_performance_exclusions AS e
-                         WHERE e.account_id = a.id
-                           AND (e.category_id = t.category_id OR e.category_id = c.parent_id)
-                     )
-               ), 0), 0) END AS performance_prev,
+               0 AS performance_used,
+               0 AS performance_prev,
+               a.performance_start_day AS performance_start_day,
                a.initial_balance
                  + IFNULL((
                      SELECT SUM(CASE t.type WHEN 'INCOME' THEN t.amount ELSE -t.amount END)
@@ -119,11 +85,36 @@ interface AccountDao {
         monthEnd: Long,
         yearStart: Long,
         yearEnd: Long,
-        prevMonthStart: Long,
-        prevMonthEnd: Long,
-        prevYearStart: Long,
-        prevYearEnd: Long,
     ): Flow<List<AccountBalance>>
+
+    /**
+     * 실적 자산의 날짜별 실적. 주기는 자산마다 시작일이 달라 쿼리 하나로 범위를 정할 수 없다.
+     * 그래서 [from] 부터 날마다 더해 두고, 자산별 주기로 묶는 건 저장소가 맡는다.
+     *
+     * 어떤 돈을 실적으로 치는지는 여기서 정한다. 지출은 더하고 환불(수입)은 빼며,
+     * 하나씩 뺀 내역과 뺄 카테고리(소분류면 그 대분류가 빠진 경우도)에 붙은 것은 세지 않는다.
+     */
+    @Query(
+        """
+        SELECT t.account_id AS account_id,
+               t.date_epoch_day AS date_epoch_day,
+               SUM(CASE t.type WHEN 'INCOME' THEN -t.amount ELSE t.amount END) AS amount
+        FROM transactions AS t
+        JOIN accounts AS a ON a.id = t.account_id
+        LEFT JOIN categories AS c ON c.id = t.category_id
+        WHERE a.performance_target IS NOT NULL
+          AND t.type IN ('EXPENSE', 'INCOME')
+          AND t.date_epoch_day >= :from
+          AND t.excluded_from_performance = 0
+          AND NOT EXISTS (
+              SELECT 1 FROM account_performance_exclusions AS e
+              WHERE e.account_id = a.id
+                AND (e.category_id = t.category_id OR e.category_id = c.parent_id)
+          )
+        GROUP BY t.account_id, t.date_epoch_day
+        """
+    )
+    fun observePerformanceDays(from: Long): Flow<List<PerformanceDay>>
 
     @Query("SELECT category_id FROM account_performance_exclusions WHERE account_id = :accountId")
     suspend fun excludedCategoryIds(accountId: Long): List<Long>

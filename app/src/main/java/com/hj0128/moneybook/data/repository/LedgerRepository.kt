@@ -20,6 +20,7 @@ import com.hj0128.moneybook.data.model.BudgetSummary
 import com.hj0128.moneybook.data.model.CategoryNode
 import com.hj0128.moneybook.data.model.CategoryTotal
 import com.hj0128.moneybook.data.model.LedgerPeriod
+import com.hj0128.moneybook.data.model.PerformanceCycle
 import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.model.MonthTotal
 import com.hj0128.moneybook.data.model.toNodes
@@ -119,24 +120,38 @@ class LedgerRepository(
         categoryDao.observeByType(type).map { it.toNodes() }
 
     /**
-     * 자산 목록. 한도 사용액과 실적은 [today] 가 속한 달/해 기준이고, 지난 실적은 그 바로 전 달/해다.
+     * 자산 목록. 한도 사용액은 [today] 가 속한 달/해 기준이다.
+     * 실적은 자산마다 주기(매월은 시작일까지)가 달라 날짜별 실적을 받아 여기서 주기별로 더한다.
+     * 지난 실적은 그 바로 전 주기다.
      *
      * 화면이 떠 있는 동안 날짜가 바뀌어도 다시 구독하기 전까지는 이전 기간 기준이다.
      * 가계부를 자정을 넘겨 켜 두는 일은 드물어서 그 정도는 감수한다.
      */
     fun observeAccounts(today: LocalDate = LocalDate.now()): Flow<List<AccountBalance>> {
         val month = YearMonth.from(today)
-        val prevMonth = month.minusMonths(1)
-        return accountDao.observeBalances(
+        val balances = accountDao.observeBalances(
             monthStart = month.atDay(1).toEpochDay(),
             monthEnd = month.atEndOfMonth().toEpochDay(),
             yearStart = LocalDate.of(today.year, 1, 1).toEpochDay(),
             yearEnd = LocalDate.of(today.year, 12, 31).toEpochDay(),
-            prevMonthStart = prevMonth.atDay(1).toEpochDay(),
-            prevMonthEnd = prevMonth.atEndOfMonth().toEpochDay(),
-            prevYearStart = LocalDate.of(today.year - 1, 1, 1).toEpochDay(),
-            prevYearEnd = LocalDate.of(today.year - 1, 12, 31).toEpochDay(),
         )
+        // 가장 긴 주기는 매년이라 작년 1월 1일부터면 어떤 자산의 지난 주기든 다 들어온다.
+        val days = accountDao.observePerformanceDays(LocalDate.of(today.year - 1, 1, 1).toEpochDay())
+        return combine(balances, days) { accounts, performanceDays ->
+            val byAccount = performanceDays.groupBy { it.accountId }
+            accounts.map { account ->
+                val period = account.performancePeriod
+                if (account.performanceTarget == null || period == null) return@map account
+                val rows = byAccount[account.id].orEmpty()
+                fun sumIn(cycle: PerformanceCycle): Long =
+                    // 지난 주기에 산 걸 이번 주기에 취소하면 음수가 될 수 있다. 0 에서 멈춘다.
+                    rows.filter { LocalDate.ofEpochDay(it.epochDay) in cycle }.sumOf { it.amount }.coerceAtLeast(0L)
+                account.copy(
+                    performanceUsed = sumIn(PerformanceCycle.current(period, account.performanceStartDay, today)),
+                    performancePrev = sumIn(PerformanceCycle.previous(period, account.performanceStartDay, today)),
+                )
+            }
+        }
     }
 
     fun observeAccount(id: Long): Flow<AccountBalance?> =
@@ -535,6 +550,7 @@ class LedgerRepository(
                 performanceTarget = performance?.target,
                 performancePeriod = performance?.period,
                 performanceSteps = performance?.stepsText,
+                performanceStartDay = performance?.storedStartDay,
             )
         )
         accountDao.replaceExclusions(id, performance?.excludedCategoryIds.orEmpty())
@@ -579,6 +595,7 @@ class LedgerRepository(
                 performanceTarget = performance?.target,
                 performancePeriod = performance?.period,
                 performanceSteps = performance?.stepsText,
+                performanceStartDay = performance?.storedStartDay,
                 // 다른 상위로 옮기면 그 목록의 맨 끝에 넣는다. 예전 번호는 옮겨 간 곳에서 뜻이 없다.
                 sortOrder = if (parentId == current.parentId) current.sortOrder else accountDao.nextSortOrder(parentId),
             )
@@ -646,8 +663,11 @@ data class AccountPerformance(
     val excludedCategoryIds: Set<Long> = emptySet(),
     /** 1단계([target]) 위의 단계. 작은 것부터. */
     val steps: List<Long> = emptyList(),
+    /** 매월 실적을 세기 시작하는 날(1~31). */
+    val startDay: Int = 1,
 ) {
     fun validate(): Throwable? = when {
+        startDay !in 1..31 -> IllegalArgumentException("시작일은 1일부터 31일 사이로 적어 주세요.")
         target <= 0L || steps.any { it <= 0L } -> IllegalArgumentException("실적 금액을 입력해 주세요.")
         steps.any { it <= target } || steps.zipWithNext().any { (a, b) -> a >= b } ->
             IllegalArgumentException("단계마다 금액이 달라야 합니다.")
@@ -656,15 +676,24 @@ data class AccountPerformance(
 
     val stepsText: String? get() = steps.takeIf { it.isNotEmpty() }?.joinToString(",")
 
+    /** 저장할 시작일. 1일이거나 매년 실적이면 따로 적지 않는다(달력 기준). */
+    val storedStartDay: Int? get() = startDay.takeIf { it != 1 && period == PeriodUnit.MONTH }
+
     companion object {
         /** 적은 순서와 상관없이 작은 것이 1단계다. 같은 금액이 둘이면 [validate] 가 막는다. */
-        fun of(amounts: List<Long>, period: PeriodUnit, excludedCategoryIds: Set<Long>): AccountPerformance {
+        fun of(
+            amounts: List<Long>,
+            period: PeriodUnit,
+            excludedCategoryIds: Set<Long>,
+            startDay: Int = 1,
+        ): AccountPerformance {
             val sorted = amounts.sorted()
             return AccountPerformance(
                 target = sorted.firstOrNull() ?: 0L,
                 period = period,
                 excludedCategoryIds = excludedCategoryIds,
                 steps = sorted.drop(1),
+                startDay = startDay,
             )
         }
     }

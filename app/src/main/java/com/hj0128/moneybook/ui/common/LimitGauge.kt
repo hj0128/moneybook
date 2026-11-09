@@ -265,7 +265,10 @@ fun PerformanceGauge(
  */
 fun performancePrevText(account: AccountBalance): String {
     val prev = account.performancePrev
-    return "${account.performancePrevLabel} 실적 ${prev.formatWon()} · ${performancePrevWord(account, withShortfall = true)}"
+    // 1일이 아닌 날부터 세면 "지난달"이 달력의 지난달과 다르다. 어느 날 기준인지 함께 적는다.
+    val basis = account.performanceCustomStartDay?.let { " · ${it}일 기준" }.orEmpty()
+    return "${account.performancePrevLabel} 실적 ${prev.formatWon()} · " +
+        performancePrevWord(account, withShortfall = true) + basis
 }
 
 /**
