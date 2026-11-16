@@ -16,10 +16,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hj0128.moneybook.data.model.AccountBalance
 import com.hj0128.moneybook.ui.theme.LocalLedgerColors
@@ -187,8 +189,9 @@ fun PerformanceGauge(
                 listOfNotNull(currentBenefit, nextBenefit).joinToString("") { ", $it" }
         },
     ) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.Bottom) {
+        // 한 줄에 다 들어가지 않으면 오른쪽 말을 아랫줄로 내린다. 목표 금액을 "700,00…"처럼 자르면 안 된다.
+        WrapTrailing(gap = 8.dp) {
+            Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     text = "${account.performancePeriodLabel} 실적 ",
                     style = MaterialTheme.typography.bodySmall,
@@ -209,7 +212,6 @@ fun PerformanceGauge(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.width(8.dp))
             Text(
                 text = rightText,
                 style = MaterialTheme.typography.bodySmall,
@@ -273,6 +275,38 @@ fun PerformanceGauge(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * 두 칸을 한 줄에 놓되, 둘 다 들어가지 않으면 두 번째 칸을 아랫줄 왼쪽으로 내린다.
+ * 한 줄일 때는 첫 칸은 왼쪽, 두 번째 칸은 오른쪽 끝에 붙이고 아래쪽을 맞춘다.
+ */
+@Composable
+private fun WrapTrailing(
+    gap: Dp,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Layout(content = content, modifier = modifier) { measurables, constraints ->
+        require(measurables.size == 2)
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val lead = measurables[0].measure(loose)
+        val trail = measurables[1].measure(loose)
+        val width = constraints.maxWidth
+        val gapPx = gap.roundToPx()
+        if (lead.width + gapPx + trail.width <= width) {
+            val height = maxOf(lead.height, trail.height)
+            layout(width, height) {
+                lead.placeRelative(0, height - lead.height)
+                trail.placeRelative(width - trail.width, height - trail.height)
+            }
+        } else {
+            layout(width, lead.height + trail.height) {
+                lead.placeRelative(0, 0)
+                trail.placeRelative(0, lead.height)
+            }
         }
     }
 }
