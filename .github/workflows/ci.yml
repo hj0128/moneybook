@@ -1,0 +1,97 @@
+name: CI
+
+# 푸시와 PR 마다 단위 테스트·빌드, 그리고 기기에서 DB 마이그레이션 테스트를 돌린다.
+# 마이그레이션이 틀리면 업데이트한 사람의 앱이 열리지 않거나, 예전 백업을 복원한 데이터가 조용히 틀어진다.
+# 로컬에서는 기기 테스트를 잊기 쉬워서 여기서 매번 돌린다.
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+  workflow_dispatch:
+
+# 같은 브랜치에 연달아 푸시하면 앞의 실행은 결과를 볼 일이 없으니 취소한다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 단위 테스트 · 빌드
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # 기본값("tools platform-tools")의 레거시 tools 는 저장소에서 빠져 실패한다.
+      # platform·build-tools 는 Gradle 이 compileSdk 에 맞춰 받는다.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      # Gradle 버전은 래퍼를 따른다. 로컬과 같은 Gradle 로 빌드한다.
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 단위 테스트
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: 디버그 APK 빌드
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: 테스트 결과 올리기
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/
+
+  migration:
+    name: DB 마이그레이션 (에뮬레이터)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # 리눅스 러너에서 에뮬레이터를 하드웨어 가속으로 돌리려면 KVM 을 열어 줘야 한다.
+      - name: KVM 사용 허용
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # 에뮬레이터를 켜기 전에 미리 빌드해 둔다. 켜 둔 채로 빌드하면 그만큼 시간이 늘고 기기가 불안정해진다.
+      - name: 테스트 APK 빌드
+        run: ./gradlew assembleDebug assembleDebugAndroidTest --stacktrace
+
+      - name: 마이그레이션 테스트
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.hj0128.moneybook.MigrationTest --stacktrace
+
+      - name: 테스트 결과 올리기
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-test-report
+          path: app/build/reports/androidTests/
