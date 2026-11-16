@@ -328,14 +328,23 @@ fun currentBenefitText(account: AccountBalance): String? {
 }
 
 /**
- * 이번 실적으로 다음에 받을 혜택. 아직 채울 단계가 남았으면 그 단계의 혜택을 앞에 둔다.
- * "120,000원 더 쓰면 다음 달 혜택 · 10% 할인" / 다 채웠으면 "다음 달 혜택 · 10% 할인".
+ * 이번 실적으로 다음에 받을 혜택. 이미 채운 단계의 혜택을 먼저 말하고, 더 채울 단계가 있으면 뒤에 붙인다.
+ * - 하나도 못 채움: "120,000원 더 쓰면 다음 달 혜택 · 5% 할인"
+ * - 일부 채움: "다음 달 혜택 · 5% 할인 · 250,000원 더 쓰면 10% 할인"
+ * - 다 채움: "다음 달 혜택 · 10% 할인"
+ * 채운 단계의 혜택을 비워 두었으면 다음 단계 쪽만, 다음 단계 혜택을 비워 두었으면 채운 쪽만 말한다.
  */
 fun nextBenefitText(account: AccountBalance): String? {
     if (!account.hasBenefits) return null
     val label = "${account.performanceNextLabel} 혜택"
-    account.nextTierBenefit?.let { return "${account.performanceRemaining.formatWon()} 더 쓰면 $label · $it" }
-    return account.nextCycleBenefit?.takeIf { account.performanceAchieved }?.let { "$label · $it" }
+    val secured = account.nextCycleBenefit
+    val upsell = account.nextTierBenefit?.let { "${account.performanceRemaining.formatWon()} 더 쓰면 $it" }
+    return when {
+        secured != null && upsell != null -> "$label · $secured · $upsell"
+        secured != null -> "$label · $secured"
+        upsell != null -> "${account.performanceRemaining.formatWon()} 더 쓰면 $label · ${account.nextTierBenefit}"
+        else -> null
+    }
 }
 
 /**

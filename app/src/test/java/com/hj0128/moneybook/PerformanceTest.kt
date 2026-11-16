@@ -176,10 +176,31 @@ class PerformanceTest {
     }
 
     @Test
-    fun `다음 단계 혜택까지 남은 금액을 알려 준다`() {
+    fun `하나도 못 채웠으면 1단계 혜택까지 남은 금액`() {
+        val card = card(steps = "700000", benefits = twoTiers, used = 100_000)
+
+        assertEquals("200,000원 더 쓰면 다음 달 혜택 · 통신비 1만원 할인", nextBenefitText(card))
+    }
+
+    @Test
+    fun `채운 단계 혜택을 먼저 말하고 다음 단계까지 남은 금액을 붙인다`() {
         val card = card(steps = "700000", benefits = twoTiers, used = 450_000)
 
+        assertEquals("다음 달 혜택 · 통신비 1만원 할인 · 250,000원 더 쓰면 10% 청구 할인", nextBenefitText(card))
+    }
+
+    @Test
+    fun `채운 단계 혜택을 비워 두었으면 다음 단계 쪽만`() {
+        val card = card(steps = "700000", benefits = NL + "10% 청구 할인", used = 450_000)
+
         assertEquals("250,000원 더 쓰면 다음 달 혜택 · 10% 청구 할인", nextBenefitText(card))
+    }
+
+    @Test
+    fun `다음 단계 혜택을 비워 두었으면 채운 쪽만`() {
+        val card = card(steps = "700000", benefits = "통신비 1만원 할인", used = 450_000)
+
+        assertEquals("다음 달 혜택 · 통신비 1만원 할인", nextBenefitText(card))
     }
 
     @Test
