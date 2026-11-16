@@ -56,7 +56,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+                .addMigrations(*ALL_MIGRATIONS)
                 // 외래키 제약을 실제로 켜준다(Room 은 기본으로 켜지 않는다).
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -301,3 +301,12 @@ internal val MIGRATION_13_14 = object : Migration(13, 14) {
         db.execSQL("ALTER TABLE `accounts` ADD COLUMN `performance_benefits` TEXT")
     }
 }
+
+/**
+ * 모든 마이그레이션. 앱과 마이그레이션 테스트가 같은 목록을 쓴다.
+ * 위의 MIGRATION_* 보다 아래에 두어야 한다. 위에 두면 초기화 순서 때문에 null 이 담긴다.
+ */
+internal val ALL_MIGRATIONS: Array<Migration> = arrayOf(
+    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+    MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14,
+)

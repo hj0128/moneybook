@@ -38,6 +38,10 @@ android {
     buildFeatures {
         compose = true
     }
+    // 마이그레이션 테스트가 예전 버전 스키마로 DB 를 만들 수 있게 내보낸 스키마를 테스트 APK 에 넣는다.
+    sourceSets {
+        getByName("androidTest").assets.directories.add("$projectDir/schemas")
+    }
 }
 
 kotlin {
@@ -70,6 +74,9 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.androidx.navigation.compose)
+    // navigation 은 kotlinx-serialization 1.7 을 끌어오는데 room-testing 은 1.8 로 만들어졌다.
+    // 테스트 APK 는 앱과 같은 버전을 써야 해서, 앱 쪽을 1.8 로 맞춘다(낮으면 스키마를 읽다 AbstractMethodError).
+    implementation(platform(libs.kotlinx.serialization.bom))
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
@@ -81,4 +88,5 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.room.testing)
 }
