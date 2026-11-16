@@ -177,11 +177,14 @@ fun PerformanceGauge(
     val doneColor = MaterialTheme.colorScheme.primary
     val rightText = performanceProgressWord(account)
     val prevText = performancePrevText(account)
+    val currentBenefit = currentBenefitText(account)
+    val nextBenefit = nextBenefitText(account)
 
     Column(
         modifier = modifier.semantics(mergeDescendants = true) {
             contentDescription = "${account.name} ${account.performancePeriodLabel} 실적 " +
-                "${used.formatWon()}, 목표 ${target.formatWon()}, $rightText, $prevText"
+                "${used.formatWon()}, 목표 ${target.formatWon()}, $rightText, $prevText" +
+                listOfNotNull(currentBenefit, nextBenefit).joinToString("") { ", $it" }
         },
     ) {
         Row(verticalAlignment = Alignment.Bottom) {
@@ -256,7 +259,49 @@ fun PerformanceGauge(
             style = MaterialTheme.typography.bodySmall,
             color = if (account.performancePrevAchieved) doneColor else MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (currentBenefit != null) {
+            Text(
+                text = currentBenefit,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                color = if (account.currentBenefit != null) doneColor else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (nextBenefit != null) {
+            Text(
+                text = nextBenefit,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
+}
+
+/**
+ * 지금 받는 혜택. "이번 달 혜택 · 통신비 1만원 할인" / "이번 달 혜택 없음".
+ *
+ * 지난 실적 줄 바로 아래에 둔다. 혜택은 지난 실적으로 정해져서 "지난달 1단계 달성"의 결과가 이 줄이다.
+ * 혜택을 하나도 안 적었거나, 채운 단계의 혜택만 비워 두었으면 null(줄을 내지 않는다).
+ */
+fun currentBenefitText(account: AccountBalance): String? {
+    if (!account.hasBenefits) return null
+    val label = "${account.performancePeriodLabel} 혜택"
+    return when {
+        account.currentBenefit != null -> "$label · ${account.currentBenefit}"
+        account.tiersReached(account.performancePrev) == 0 -> "$label 없음"
+        else -> null
+    }
+}
+
+/**
+ * 이번 실적으로 다음에 받을 혜택. 아직 채울 단계가 남았으면 그 단계의 혜택을 앞에 둔다.
+ * "120,000원 더 쓰면 다음 달 혜택 · 10% 할인" / 다 채웠으면 "다음 달 혜택 · 10% 할인".
+ */
+fun nextBenefitText(account: AccountBalance): String? {
+    if (!account.hasBenefits) return null
+    val label = "${account.performanceNextLabel} 혜택"
+    account.nextTierBenefit?.let { return "${account.performanceRemaining.formatWon()} 더 쓰면 $label · $it" }
+    return account.nextCycleBenefit?.takeIf { account.performanceAchieved }?.let { "$label · $it" }
 }
 
 /**

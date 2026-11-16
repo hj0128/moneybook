@@ -491,6 +491,12 @@ private fun AccountEditDialog(
         }
     }
     val performanceAmounts = performanceTexts.map { it.toLongOrNull() ?: 0L }
+    // 단계마다 받는 혜택. 금액 칸과 늘 같은 수만큼 있다.
+    val benefitTexts = remember(target) {
+        mutableStateListOf<String>().apply {
+            addAll(existing?.performanceTierBenefits.orEmpty().ifEmpty { listOf("") })
+        }
+    }
     var startDayText by remember(target) {
         mutableStateOf((existing?.performanceStartDay ?: 1).toString())
     }
@@ -660,13 +666,29 @@ private fun AccountEditDialog(
                             label = { Text(if (performanceTexts.size == 1) "실적 금액" else "${index + 1}단계 금액") },
                             trailingIcon = if (performanceTexts.size > 1) {
                                 {
-                                    IconButton(onClick = { performanceTexts.removeAt(index) }) {
+                                    IconButton(onClick = {
+                                        performanceTexts.removeAt(index)
+                                        benefitTexts.removeAt(index)
+                                    }) {
                                         Icon(Icons.Default.Close, contentDescription = "${index + 1}단계 빼기")
                                     }
                                 }
                             } else {
                                 null
                             },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        // 금액 바로 아래에 둔다. 어느 금액의 혜택인지 칸 위치로 알 수 있다.
+                        // 띄우지 않으면 혜택 칸의 라벨이 금액 칸 테두리에 붙는다.
+                        Spacer(Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = benefitTexts[index],
+                            onValueChange = { input -> benefitTexts[index] = input.replace('\n', ' ').take(MaxBenefitLength) },
+                            label = { Text(if (performanceTexts.size == 1) "혜택 (선택)" else "${index + 1}단계 혜택 (선택)") },
+                            placeholder = { Text("예: 통신비 1만원 할인") },
+                            // 실적 칸 전체에 대한 안내라 단계 묶음의 맨 끝에 둔다. 금액과 혜택 사이에 끼면 둘이 떨어져 보인다.
                             supportingText = if (isLast) {
                                 {
                                     Text(
@@ -681,13 +703,17 @@ private fun AccountEditDialog(
                                 null
                             },
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        // 다음 단계와 나눈다. 붙어 있으면 어느 혜택이 어느 금액 것인지 헷갈린다.
+                        if (!isLast) Spacer(Modifier.height(12.dp))
                     }
                     // "30만원 이상 5%, 70만원 이상 10%"처럼 혜택이 단계로 나뉘는 카드용. 다섯 단계면 충분하다.
                     if (performanceTexts.size < MaxPerformanceTiers) {
-                        TextButton(onClick = { performanceTexts.add("") }) {
+                        TextButton(onClick = {
+                            performanceTexts.add("")
+                            benefitTexts.add("")
+                        }) {
                             Icon(Icons.Default.Add, contentDescription = null)
                             Spacer(Modifier.width(4.dp))
                             Text("단계 추가")
@@ -711,7 +737,9 @@ private fun AccountEditDialog(
                         limitPeriod?.let { AccountLimit(limitText.toLongOrNull() ?: 0L, it) },
                         parentId,
                         performancePeriod?.let {
-                            AccountPerformance.of(performanceAmounts, it, excluded, startDay = shownStartDay)
+                            AccountPerformance.of(
+                                performanceAmounts, it, excluded, startDay = shownStartDay, benefits = benefitTexts.toList(),
+                            )
                         },
                     )
                 },
@@ -1033,3 +1061,6 @@ private fun buildDeleteSummary(target: AccountDeleteTarget): String {
 
 /** 실적 단계 수 상한. 카드 혜택이 그보다 잘게 나뉘는 일은 드물고, 칸이 늘면 수정 창이 길어진다. */
 private const val MaxPerformanceTiers = 5
+
+/** 혜택 한 줄의 길이. 막대 아래 한두 줄에 들어갈 만큼이면 된다. */
+private const val MaxBenefitLength = 40

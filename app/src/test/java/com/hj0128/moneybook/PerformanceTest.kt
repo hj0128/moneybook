@@ -6,6 +6,8 @@ import com.hj0128.moneybook.data.model.PerformanceDay
 import com.hj0128.moneybook.data.model.PeriodUnit
 import com.hj0128.moneybook.data.repository.AccountPerformance
 import com.hj0128.moneybook.data.repository.withPerformance
+import com.hj0128.moneybook.ui.common.currentBenefitText
+import com.hj0128.moneybook.ui.common.nextBenefitText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -23,6 +25,7 @@ class PerformanceTest {
         period: PeriodUnit? = PeriodUnit.MONTH,
         steps: String? = null,
         startDay: Int? = null,
+        benefits: String? = null,
         used: Long = 0,
         prev: Long = 0,
     ) = AccountBalance(
@@ -35,6 +38,7 @@ class PerformanceTest {
         performancePeriod = period,
         performanceSteps = steps,
         performanceStartDay = startDay,
+        performanceBenefits = benefits,
         performanceUsed = used,
         performancePrev = prev,
     )
@@ -149,5 +153,73 @@ class PerformanceTest {
         assertNull(AccountPerformance(target = 1, period = PeriodUnit.MONTH, startDay = 1).storedStartDay)
         assertNull(AccountPerformance(target = 1, period = PeriodUnit.YEAR, startDay = 15).storedStartDay)
         assertEquals(15, AccountPerformance(target = 1, period = PeriodUnit.MONTH, startDay = 15).storedStartDay)
+    }
+
+    // ---- 혜택 ----
+
+    private val twoTiers = "통신비 1만원 할인" + NL + "10% 청구 할인"
+
+    @Test
+    fun `혜택은 지난달 채운 단계를 따른다`() {
+        val card = card(steps = "700000", benefits = twoTiers, prev = 720_000, used = 100_000)
+
+        assertEquals("10% 청구 할인", card.currentBenefit)
+        assertEquals("이번 달 혜택 · 10% 청구 할인", currentBenefitText(card))
+    }
+
+    @Test
+    fun `지난달 못 채웠으면 혜택 없음`() {
+        val card = card(steps = "700000", benefits = twoTiers, prev = 100_000)
+
+        assertNull(card.currentBenefit)
+        assertEquals("이번 달 혜택 없음", currentBenefitText(card))
+    }
+
+    @Test
+    fun `다음 단계 혜택까지 남은 금액을 알려 준다`() {
+        val card = card(steps = "700000", benefits = twoTiers, used = 450_000)
+
+        assertEquals("250,000원 더 쓰면 다음 달 혜택 · 10% 청구 할인", nextBenefitText(card))
+    }
+
+    @Test
+    fun `다 채우면 다음 달에 받을 혜택`() {
+        val card = card(steps = "700000", benefits = twoTiers, used = 800_000)
+
+        assertEquals("다음 달 혜택 · 10% 청구 할인", nextBenefitText(card))
+    }
+
+    @Test
+    fun `혜택을 안 적었으면 혜택 줄이 없다`() {
+        val card = card(steps = "700000", prev = 800_000)
+
+        assertFalse(card.hasBenefits)
+        assertNull(currentBenefitText(card))
+        assertNull(nextBenefitText(card))
+    }
+
+    @Test
+    fun `채운 단계의 혜택만 비워 두면 없음이라고 하지 않는다`() {
+        val card = card(steps = "700000", benefits = NL + "10% 청구 할인", prev = 300_000)
+
+        assertNull(currentBenefitText(card))
+    }
+
+    @Test
+    fun `혜택은 금액과 함께 정렬되고 끝쪽 빈 칸은 저장하지 않는다`() {
+        val performance = AccountPerformance.of(
+            listOf(700_000, 300_000, 1_000_000),
+            PeriodUnit.MONTH,
+            emptySet(),
+            benefits = listOf("10% 할인", "5% 할인", " "),
+        )
+
+        assertEquals(listOf("5% 할인", "10% 할인", " "), performance.benefits)
+        assertEquals("5% 할인" + NL + "10% 할인", performance.benefitsText)
+        assertNull(AccountPerformance.of(listOf(300_000), PeriodUnit.MONTH, emptySet(), benefits = listOf("")).benefitsText)
+    }
+
+    private companion object {
+        val NL = Char(10).toString()
     }
 }

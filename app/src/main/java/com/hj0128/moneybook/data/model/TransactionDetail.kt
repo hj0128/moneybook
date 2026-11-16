@@ -125,6 +125,9 @@ data class AccountBalance(
     /** 매월 실적을 세기 시작하는 날(1~31). null 이면 1일(달력 기준). */
     @ColumnInfo(name = "performance_start_day")
     val performanceStartDay: Int? = null,
+    /** 단계마다 받는 혜택, 단계 순서대로 한 줄씩. 적지 않았으면 null. */
+    @ColumnInfo(name = "performance_benefits")
+    val performanceBenefits: String? = null,
 ) {
     /** 1일이 아닌 날에 시작하는 매월 실적이면 그 날. "15일 기준"처럼 막대 아래에 적는다. */
     val performanceCustomStartDay: Int?
@@ -143,6 +146,28 @@ data class AccountBalance(
         }
 
     val isTiered: Boolean get() = performanceTiers.size > 1
+
+    /** 단계마다 받는 혜택. [performanceTiers] 와 같은 순서이고 길이도 같다. 적지 않은 단계는 빈 문자열. */
+    val performanceTierBenefits: List<String>
+        get() {
+            val lines = performanceBenefits.orEmpty().split('\n')
+            return performanceTiers.indices.map { lines.getOrElse(it) { "" }.trim() }
+        }
+
+    /** 혜택을 하나라도 적었는지. 안 적었으면 막대 아래에 혜택 줄을 내지 않는다. */
+    val hasBenefits: Boolean get() = hasPerformance && performanceTierBenefits.any { it.isNotEmpty() }
+
+    /** [tier] 단계(1부터)의 혜택. 0 단계(못 채움)거나 적지 않았으면 null. */
+    fun benefitOf(tier: Int): String? = performanceTierBenefits.getOrNull(tier - 1)?.takeIf { it.isNotEmpty() }
+
+    /** 지금 받는 혜택. 혜택은 지난 주기 실적으로 정해진다. */
+    val currentBenefit: String? get() = benefitOf(tiersReached(performancePrev))
+
+    /** 이번 주기에 채운 만큼 다음 주기에 받을 혜택. */
+    val nextCycleBenefit: String? get() = benefitOf(tiersReached(performanceUsed))
+
+    /** 다음 단계를 채우면 다음 주기에 받을 혜택. 다 채웠거나 적지 않았으면 null. */
+    val nextTierBenefit: String? get() = benefitOf(tiersReached(performanceUsed) + 1)
 
     /** [amount] 로 채운 단계 수. 0 이면 1단계도 못 채웠다. */
     fun tiersReached(amount: Long): Int = performanceTiers.count { amount >= it }
@@ -170,6 +195,12 @@ data class AccountBalance(
         get() = when (performancePeriod) {
             PeriodUnit.YEAR -> "작년"
             PeriodUnit.MONTH, null -> "지난달"
+        }
+
+    val performanceNextLabel: String
+        get() = when (performancePeriod) {
+            PeriodUnit.YEAR -> "내년"
+            PeriodUnit.MONTH, null -> "다음 달"
         }
 
     val isTopLevel: Boolean get() = parentId == null

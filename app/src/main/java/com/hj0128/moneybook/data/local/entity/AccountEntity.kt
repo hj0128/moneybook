@@ -86,6 +86,12 @@ data class AccountEntity(
      */
     @ColumnInfo(name = "performance_start_day")
     val performanceStartDay: Int? = null,
+    /**
+     * 실적 단계마다 받는 혜택. 단계 순서대로 한 줄씩("통신비 1만원 할인\n10% 청구 할인").
+     * 혜택을 적지 않은 단계는 빈 줄이다. 아무것도 안 적었으면 null.
+     */
+    @ColumnInfo(name = "performance_benefits")
+    val performanceBenefits: String? = null,
 ) {
     val isTopLevel: Boolean get() = parentId == null
 }

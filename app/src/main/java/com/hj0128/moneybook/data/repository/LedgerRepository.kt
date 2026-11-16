@@ -541,6 +541,7 @@ class LedgerRepository(
                 performancePeriod = performance?.period,
                 performanceSteps = performance?.stepsText,
                 performanceStartDay = performance?.storedStartDay,
+                performanceBenefits = performance?.benefitsText,
             )
         )
         accountDao.replaceExclusions(id, performance?.excludedCategoryIds.orEmpty())
@@ -586,6 +587,7 @@ class LedgerRepository(
                 performancePeriod = performance?.period,
                 performanceSteps = performance?.stepsText,
                 performanceStartDay = performance?.storedStartDay,
+                performanceBenefits = performance?.benefitsText,
                 // 다른 상위로 옮기면 그 목록의 맨 끝에 넣는다. 예전 번호는 옮겨 간 곳에서 뜻이 없다.
                 sortOrder = if (parentId == current.parentId) current.sortOrder else accountDao.nextSortOrder(parentId),
             )
@@ -655,6 +657,8 @@ data class AccountPerformance(
     val steps: List<Long> = emptyList(),
     /** 매월 실적을 세기 시작하는 날(1~31). */
     val startDay: Int = 1,
+    /** 단계마다 받는 혜택. [target], [steps] 순서와 같다. 적지 않은 단계는 빈 문자열이다. */
+    val benefits: List<String> = emptyList(),
 ) {
     fun validate(): Throwable? = when {
         startDay !in 1..31 -> IllegalArgumentException("시작일은 1일부터 31일 사이로 적어 주세요.")
@@ -666,24 +670,37 @@ data class AccountPerformance(
 
     val stepsText: String? get() = steps.takeIf { it.isNotEmpty() }?.joinToString(",")
 
+    /** 저장할 혜택. 단계마다 한 줄. 끝쪽 빈 줄은 버리고, 하나도 안 적었으면 null. */
+    val benefitsText: String?
+        get() = benefits.take(steps.size + 1)
+            .map { it.replace('\n', ' ').trim() }
+            .dropLastWhile { it.isEmpty() }
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString("\n")
+
     /** 저장할 시작일. 1일이거나 매년 실적이면 따로 적지 않는다(달력 기준). */
     val storedStartDay: Int? get() = startDay.takeIf { it != 1 && period == PeriodUnit.MONTH }
 
     companion object {
-        /** 적은 순서와 상관없이 작은 것이 1단계다. 같은 금액이 둘이면 [validate] 가 막는다. */
+        /**
+         * 적은 순서와 상관없이 작은 것이 1단계다. 같은 금액이 둘이면 [validate] 가 막는다.
+         * [benefits] 는 [amounts] 와 같은 순서로 받아, 금액을 정렬할 때 함께 따라간다.
+         */
         fun of(
             amounts: List<Long>,
             period: PeriodUnit,
             excludedCategoryIds: Set<Long>,
             startDay: Int = 1,
+            benefits: List<String> = emptyList(),
         ): AccountPerformance {
-            val sorted = amounts.sorted()
+            val sorted = amounts.indices.map { amounts[it] to benefits.getOrElse(it) { "" } }.sortedBy { it.first }
             return AccountPerformance(
-                target = sorted.firstOrNull() ?: 0L,
+                target = sorted.firstOrNull()?.first ?: 0L,
                 period = period,
                 excludedCategoryIds = excludedCategoryIds,
-                steps = sorted.drop(1),
+                steps = sorted.drop(1).map { it.first },
                 startDay = startDay,
+                benefits = sorted.map { it.second },
             )
         }
     }

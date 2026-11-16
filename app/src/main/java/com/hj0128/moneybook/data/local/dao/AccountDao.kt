@@ -63,6 +63,7 @@ interface AccountDao {
                0 AS performance_used,
                0 AS performance_prev,
                a.performance_start_day AS performance_start_day,
+               a.performance_benefits AS performance_benefits,
                a.initial_balance
                  + IFNULL((
                      SELECT SUM(CASE t.type WHEN 'INCOME' THEN t.amount ELSE -t.amount END)

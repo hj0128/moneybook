@@ -44,7 +44,7 @@ abstract class AppDatabase : RoomDatabase() {
         const val DB_NAME = "household.db"
 
         /** 백업을 복원할 때 이보다 새 버전에서 만든 파일은 받지 않는다(내려가는 마이그레이션이 없다). */
-        const val VERSION = 13
+        const val VERSION = 14
 
         @Volatile
         private var instance: AppDatabase? = null
@@ -56,7 +56,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                 // 외래키 제약을 실제로 켜준다(Room 은 기본으로 켜지 않는다).
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -292,5 +292,12 @@ internal val MIGRATION_11_12 = object : Migration(11, 12) {
 internal val MIGRATION_12_13 = object : Migration(12, 13) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE `accounts` ADD COLUMN `performance_start_day` INTEGER")
+    }
+}
+
+/** v14: 실적 단계마다 받는 혜택. 비어 있으면 혜택을 적지 않은 것이다. */
+internal val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `accounts` ADD COLUMN `performance_benefits` TEXT")
     }
 }
